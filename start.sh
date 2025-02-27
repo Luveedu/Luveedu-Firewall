@@ -67,7 +67,7 @@ install_luvd_firewall() {
     fi
     
     # Convert Windows CRLF to Unix LF
-    sed -i 's/\r$//' "$target"
+    sudo sed -i 's/\r$//' /usr/local/bin/luvd-firewall
     
     chmod +x "$target"
     echo "luvd-firewall installed/updated at $target"
@@ -118,10 +118,12 @@ check_and_start() {
     fi
     
     # 4. Start Service
+    sleep 5
     echo "4. Starting luvd-firewall service..."
-    systemctl start luvd-firewall.service
+    systemctl restart luvd-firewall.service
     
     # 5. Check if Service is Active
+    sleep 2
     if systemctl is-active luvd-firewall.service >/dev/null 2>&1; then
         echo "5. Service: luvd-firewall active - OK"
     else
