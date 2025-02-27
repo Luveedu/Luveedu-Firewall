@@ -65,6 +65,10 @@ install_luvd_firewall() {
         echo "Installing luvd-firewall script..."
         wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download script"; exit 1; }
     fi
+    
+    # Convert Windows CRLF to Unix LF
+    sed -i 's/\r$//' "$target"
+    
     chmod +x "$target"
     echo "luvd-firewall installed/updated at $target"
 }
