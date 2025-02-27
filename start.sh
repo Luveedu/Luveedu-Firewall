@@ -84,11 +84,11 @@ Description=Luveedu Firewall Service
 After=network.target
 
 [Service]
-Type=simple
 ExecStart=/usr/local/bin/luvd-firewall --start
 ExecStop=/usr/local/bin/luvd-firewall --stop
-Restart=on-failure
-User=root
+Restart=always
+Type=forking
+PIDFile=/var/run/luvd-firewall.pid
 
 [Install]
 WantedBy=multi-user.target
