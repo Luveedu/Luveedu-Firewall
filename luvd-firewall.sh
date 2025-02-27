@@ -9,7 +9,7 @@ VH_CONF_PATTERN="/usr/local/lsws/conf/vhosts/*/vhost.conf"
 BLOCK_DURATION=$((60*60*24))                 # 1 day in seconds
 REQUEST_LIMIT_PER_WINDOW=100                 # Max requests per 30-second window
 WINDOW_DURATION=30                           # Window duration in seconds
-CHECK_INTERVAL=1                             # Check every 1 second (Increase to 10 if you use a slow VM)
+CHECK_INTERVAL=1                             # Check every 1 second
 PID_FILE="/var/run/luvd-firewall.pid"
 BLOCKED_IPS_FILE="/var/tmp/luvd-blocked-ips.txt"
 DESIRED_LOG_FORMAT='%h %l %u %t "%r" %>s %b "%{X-Forwarded-For}i" "%{User-Agent}i"'
@@ -269,21 +269,36 @@ release_all() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') All IPs released from iptables and blocklist, logs cleared." >> "$FIREWALL_LOG"
 }
 
-# Function to release a specific IP
+# Function to release a specific IP or CIDR
 release_ip() {
-    local ip="$1"
-    if [ -z "$ip" ]; then
-        echo "Please provide an IP to release (e.g., --release-ip-66.249.70.37)"
+    local input="$1"
+    if [ -z "$input" ]; then
+        echo "Please provide an IP or CIDR to release (e.g., --release-ip 8.8.8.8 or --release-ip 8.8.8.8/24)"
         exit 1
     fi
-    if iptables -D INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
-        sed -i "/$ip/d" "$BLOCKED_IPS_FILE"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') Released IP: $ip from iptables and blocklist" >> "$FIREWALL_LOG"
-    elif iptables -D INPUT -s "${ip%.*}.0/24" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
-        sed -i "/${ip%.*}.0\/24/d" "$BLOCKED_IPS_FILE"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') Released CIDR: ${ip%.*}.0/24 from iptables and blocklist" >> "$FIREWALL_LOG"
+    
+    if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+        # Handle CIDR
+        if iptables -D INPUT -s "$input" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            sed -i "/^$input /d" "$BLOCKED_IPS_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Released CIDR: $input from iptables and blocklist" >> "$FIREWALL_LOG"
+        else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') CIDR $input was not blocked" >> "$FIREWALL_LOG"
+        fi
+    elif [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # Handle single IP
+        if iptables -D INPUT -s "$input" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            sed -i "/^$input /d" "$BLOCKED_IPS_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Released IP: $input from iptables and blocklist" >> "$FIREWALL_LOG"
+        elif iptables -D INPUT -s "${input%.*}.0/24" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            sed -i "/${input%.*}.0\/24/d" "$BLOCKED_IPS_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Released CIDR: ${input%.*}.0/24 from iptables and blocklist" >> "$FIREWALL_LOG"
+        else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') IP $input was not blocked" >> "$FIREWALL_LOG"
+        fi
     else
-        echo "$(date '+%Y-%m-%d %H:%M:%S') IP or CIDR $ip was not blocked" >> "$FIREWALL_LOG"
+        echo "Invalid IP or CIDR format. Use --release-ip <IP> or --release-ip <IP/CIDR> (e.g., --release-ip 8.8.8.8 or --release-ip 8.8.8.8/24)"
+        exit 1
     fi
 }
 
@@ -701,17 +716,20 @@ case "$1" in
     --stop) stop ;;
     --fix-logs) fix_logs ;;
     --release-all) release_all ;;
-    --release-ip-*) release_ip "${1#--release-ip-}" ;;
+    --release-ip)
+        [ -z "$2" ] && { echo "Please provide an IP or CIDR (e.g., --release-ip 8.8.8.8 or --release-ip 8.8.8.8/24)"; exit 1; }
+        release_ip "$2"
+        ;;
     --check-logs) check_logs ;;
     --check-ip)
-        [ -z "$2" ] && { echo "Please provide an IP or CIDR (e.g., --check-ip 192.169.120.162)"; exit 1; }
+        [ -z "$2" ] && { echo "Please provide an IP or CIDR (e.g., --check-ip 8.8.8.8)"; exit 1; }
         check_ip "$2"
         ;;
     --blocked-list) blocked_list ;;
     --clear-logs) clear_logs ;;
     --reset) reset ;;
     *)
-        echo "Usage: luvd-firewall [--start | --stop | --fix-logs | --release-all | --release-ip-<IP> | --check-logs | --check-ip <IP or CIDR> | --blocked-list | --clear-logs | --reset]"
+        echo "Usage: luvd-firewall [--start | --stop | --fix-logs | --release-all | --release-ip <IP or CIDR> | --check-logs | --check-ip <IP or CIDR> | --blocked-list | --clear-logs | --reset]"
         exit 1
         ;;
 esac
