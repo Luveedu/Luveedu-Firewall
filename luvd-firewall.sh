@@ -9,7 +9,7 @@ VH_CONF_PATTERN="/usr/local/lsws/conf/vhosts/*/vhost.conf"
 BLOCK_DURATION=$((60*60*24))                 # 1 day in seconds
 REQUEST_LIMIT_PER_WINDOW=100                 # Max requests per 30-second window
 WINDOW_DURATION=30                           # Window duration in seconds
-CHECK_INTERVAL=1                             # Check every 1 second
+CHECK_INTERVAL=1                             # Check every 1 second (Increase to 10 if you use a slow VM)
 PID_FILE="/var/run/luvd-firewall.pid"
 BLOCKED_IPS_FILE="/var/tmp/luvd-blocked-ips.txt"
 DESIRED_LOG_FORMAT='%h %l %u %t "%r" %>s %b "%{X-Forwarded-For}i" "%{User-Agent}i"'
@@ -474,6 +474,43 @@ check_logs() {
     done
 }
 
+# Function to rotate logs every 5 minutes
+rotate_logs() {
+    local now=$(date +%s)
+    local last_rotation_file="/var/tmp/luvd-firewall-last-rotation.txt"
+    local last_rotation=0
+    
+    # Initialize last rotation time if file doesn't exist
+    if [ ! -f "$last_rotation_file" ]; then
+        echo "$now" > "$last_rotation_file"
+    else
+        last_rotation=$(cat "$last_rotation_file")
+    fi
+    
+    # Check if 5 minutes (300 seconds) have passed since last rotation
+    if [ $((now - last_rotation)) -ge 300 ]; then
+        # Rotate firewall log
+        if [ -f "$FIREWALL_LOG" ] && [ -s "$FIREWALL_LOG" ]; then
+            mv "$FIREWALL_LOG" "$FIREWALL_LOG.$(date '+%Y%m%d_%H%M%S')"
+            touch "$FIREWALL_LOG"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Log rotated: $FIREWALL_LOG" >> "$FIREWALL_LOG"
+        fi
+        
+        # Rotate access log
+        if [ -f "$ACCESS_LOG" ] && [ -s "$ACCESS_LOG" ]; then
+            mv "$ACCESS_LOG" "$ACCESS_LOG.$(date '+%Y%m%d_%H%M%S')"
+            touch "$ACCESS_LOG"
+            chown lsadm:lsadm "$ACCESS_LOG"  # Maintain correct ownership
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Access log rotated: $ACCESS_LOG" >> "$FIREWALL_LOG"
+            # Reset last line tracking since we're starting a new log
+            echo "0" > "$LAST_LINE_FILE"
+        fi
+        
+        # Update last rotation time
+        echo "$now" > "$last_rotation_file"
+    fi
+}
+
 # Monitoring function with strict rate limiting and CDN handling
 monitor_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Luveedu Firewall started. Monitoring: $ACCESS_LOG (PID: $$)" >> "$FIREWALL_LOG"
@@ -604,9 +641,13 @@ monitor_requests() {
                 fi
             done
 
-            local cutoff_time=$(date -d '-5 minutes' '+%d/%b/%Y:%H:%M:%S')
-            grep -B 10000 "$cutoff_time" "$ACCESS_LOG" > "$TEMP_LOG" && sudo mv "$TEMP_LOG" "$ACCESS_LOG"
-            sudo chown lsadm:lsadm "$ACCESS_LOG"
+            # Remove the existing log trimming and replace with rotation
+            # local cutoff_time=$(date -d '-5 minutes' '+%d/%b/%Y:%H:%M:%S')
+            # grep -B 10000 "$cutoff_time" "$ACCESS_LOG" > "$TEMP_LOG" && sudo mv "$TEMP_LOG" "$ACCESS_LOG"
+            # sudo chown lsadm:lsadm "$ACCESS_LOG"
+            
+            # Call log rotation
+            rotate_logs
         else
             echo "$(date '+%Y-%m-%d %H:%M:%S') Access log $ACCESS_LOG not found" >> "$FIREWALL_LOG"
         fi
