@@ -93,7 +93,7 @@ Below is a detailed explanation of the available CLI options for managing and mo
 
 ---
 
-### Start the Firewall ( Use any of them )
+### Start the Firewall ( Use any 1 of them )
 
 ```
 systemctl start luvd-firewall
@@ -108,7 +108,7 @@ Starts the firewall service. Logs will be written to `/var/log/luvd-firewall.log
 
 ---
 
-### Stop the Firewall ( Use any of them )
+### Stop the Firewall ( Use any 1 of them )
 
 ```
 systemctl stop luvd-firewall
