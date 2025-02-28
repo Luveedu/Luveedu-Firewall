@@ -71,8 +71,6 @@ install_luvd_firewall() {
         "$target" --reset
         figlet "Updated"
         echo "Luveedu Firewall updated successfully!"
-        sleep 2
-        systemctl restart luvd-firewall.service
         exit 0
     else
         echo "Installing luvd-firewall script..."
@@ -88,7 +86,12 @@ install_luvd_firewall() {
 create_service() {
     local service_file="/etc/systemd/system/luvd-firewall.service"
     
-    echo "Creating luvd-firewall.service..."
+    if [ -f "$service_file" ]; then
+        echo "Existing luvd-firewall.service found, updating with latest version..."
+    else
+        echo "Creating luvd-firewall.service..."
+    fi
+    
     cat <<EOF > "$service_file"
 [Unit]
 Description=Luveedu Firewall Service
@@ -112,7 +115,9 @@ EOF
     
     systemctl daemon-reload
     systemctl enable luvd-firewall.service
-    echo "luvd-firewall.service created and enabled"
+    sleep 2
+    systemctl start luvd-firewall.service
+    echo "luvd-firewall.service created/updated and enabled"
 }
 
 # Function to check system requirements and start service (only runs for new install)
