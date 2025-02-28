@@ -108,7 +108,7 @@ install_luvd_shield() {
 # Function to set iptables rules for luvd-shield
 set_iptables_rules() {
     echo "Setting iptables rules for luvd-shield..."
-    SERVER_IP=$(curl -s --max-time 5 http://icanhazip.com 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
+    SERVER_IP=$(curl -s --max-time 2 https://ipv4.icanhazip.com/ 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
     if [ -z "$SERVER_IP" ]; then
         echo "Failed to determine server IP for iptables rules"
         exit 1
