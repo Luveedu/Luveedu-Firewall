@@ -107,21 +107,33 @@ install_luvd_shield() {
 
 # Function to set iptables rules for luvd-shield
 set_iptables_rules() {
-    echo "Setting iptables rules for luvd-shield..."
+    echo "Fixing iptables rules for Luveedu Shield..."
     SERVER_IP=$(curl -s --max-time 2 https://ipv4.icanhazip.com/ 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
     if [ -z "$SERVER_IP" ]; then
         echo "Failed to determine server IP for iptables rules"
         exit 1
     fi
 
-    iptables -F INPUT
-    iptables -N LOG_EXTERNAL 2>/dev/null || iptables -F LOG_EXTERNAL
+    if ! iptables -L LOG_EXTERNAL -n 2>/dev/null; then
+        iptables -N LOG_EXTERNAL
+    else
+        iptables -F LOG_EXTERNAL
+    fi
     iptables -A INPUT -i lo -j ACCEPT
-    iptables -A INPUT -s 127.0.0.1 -j ACCEPT
-    iptables -A INPUT -s "$SERVER_IP" -j ACCEPT
-    iptables -A INPUT -m state --state NEW -j LOG_EXTERNAL
-    iptables -A LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: "
-    echo "iptables rules set for luvd-shield (Server IP: $SERVER_IP)"
+    if ! iptables -C INPUT -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+        iptables -A INPUT -s 127.0.0.1 -j ACCEPT
+    fi
+    if ! iptables -C INPUT -s "$SERVER_IP" -j ACCEPT 2>/dev/null; then
+        iptables -A INPUT -s "$SERVER_IP" -j ACCEPT
+    fi
+    if ! iptables -C INPUT -m state --state NEW -j LOG_EXTERNAL 2>/dev/null; then
+        iptables -A INPUT -m state --state NEW -j LOG_EXTERNAL
+    fi
+    if ! iptables -C LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: " 2>/dev/null; then
+        iptables -A LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: "
+    fi
+    
+    echo "iptables rules verified and set for luvd-shield (Server IP: $SERVER_IP)"
 }
 
 # Function to create and enable luvd-firewall service

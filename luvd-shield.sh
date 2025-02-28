@@ -218,6 +218,66 @@ reset() {
     echo "Luveedu Shield reset complete."
 }
 
+# Function to fix and ensure iptables rules are properly set
+fix_all() {
+    log "Fixing iptables rules for Luveedu Shield..."
+    SERVER_IP=$(curl -s --max-time 2 https://ipv4.icanhazip.com/ 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
+    if [ -z "$SERVER_IP" ]; then
+        log "Failed to determine server IP for iptables rules"
+        echo "Failed to determine server IP for iptables rules"
+        exit 1
+    fi
+
+    # Check if rules exist, if not add them
+    iptables -F INPUT
+    if ! iptables -L LOG_EXTERNAL -n 2>/dev/null; then
+        iptables -N LOG_EXTERNAL
+    else
+        iptables -F LOG_EXTERNAL
+    fi
+    iptables -A INPUT -i lo -j ACCEPT
+    if ! iptables -C INPUT -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+        iptables -A INPUT -s 127.0.0.1 -j ACCEPT
+    fi
+    if ! iptables -C INPUT -s "$SERVER_IP" -j ACCEPT 2>/dev/null; then
+        iptables -A INPUT -s "$SERVER_IP" -j ACCEPT
+    fi
+    if ! iptables -C INPUT -m state --state NEW -j LOG_EXTERNAL 2>/dev/null; then
+        iptables -A INPUT -m state --state NEW -j LOG_EXTERNAL
+    fi
+    if ! iptables -C LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: " 2>/dev/null; then
+        iptables -A LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: "
+    fi
+    
+    log "iptables rules verified and set for luvd-shield (Server IP: $SERVER_IP)"
+    echo "iptables rules set for luvd-shield (Server IP: $SERVER_IP)"
+}
+
+# Function to update script from GitHub and reset
+update() {
+    log "Updating Luveedu Shield script from GitHub..."
+    local github_url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-shield.sh"
+    local script_path="/usr/local/bin/luvd-shield"
+    
+    # Fetch new script content
+    if curl -s --max-time 10 "$github_url" > "$script_path.tmp"; then
+        # Replace current script with new content
+        mv "$script_path.tmp" "$script_path"
+        sudo sed -i 's/\r$//' "$script_path"
+        chmod +x "$script_path"
+        log "Script updated successfully!"
+        echo "Script updated successfully!"
+        
+        # Wait and reset
+        sleep 2
+        "$script_path" --reset
+    else
+        log "Failed to update script! API ERROR!"
+        echo "Failed to update script! API ERROR!"
+        exit 1
+    fi
+}
+
 # CLI handling
 case "$1" in
     --start)
@@ -232,8 +292,14 @@ case "$1" in
     --blocked-list)
         blocked_list
         ;;
+    --fix-all)
+        fix_all
+        ;;
+    --update)
+        update
+        ;;
     *)
-        echo "Usage: luvd-shield [--start | --stop | --reset | --blocked-list]"
+        echo "Usage: luvd-shield [--start | --stop | --reset | --blocked-list | --fix-all | --update]"
         exit 1
         ;;
 esac
