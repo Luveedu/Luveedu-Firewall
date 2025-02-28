@@ -95,8 +95,13 @@ After=network.target
 ExecStart=/usr/local/bin/luvd-firewall --start
 ExecStop=/usr/local/bin/luvd-firewall --stop
 Restart=always
+RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=3
 Type=forking
 PIDFile=/var/run/luvd-firewall.pid
+TimeoutStartSec=30
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
