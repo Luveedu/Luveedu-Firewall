@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# start.sh - Installation script for Luveedu Firewall
+# start.sh - Installation script for Luveedu Firewall and Shield
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -60,34 +60,76 @@ install_luvd_firewall() {
     
     if [ -f "$target" ]; then
         echo "Existing luvd-firewall found, updating with latest version..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update script"; exit 1; }
-        # Convert Windows CRLF to Unix LF
-        sudo sed -i 's/\r$//' "$target"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-firewall"; exit 1; }
+        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
         chmod +x "$target"
         echo "luvd-firewall updated at $target"
-        # Just reset since it already existed
         echo "Running luvd-firewall --reset..."
         sleep 5
         "$target" --reset
         figlet "Updated"
         echo "Luveedu Firewall updated successfully!"
-        exit 0
+        # Don't exit here to allow luvd-shield installation
     else
         echo "Installing luvd-firewall script..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download script"; exit 1; }
-        # Convert Windows CRLF to Unix LF
-        sudo sed -i 's/\r$//' "$target"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-firewall"; exit 1; }
+        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
         chmod +x "$target"
         echo "luvd-firewall installed at $target"
     fi
 }
 
+# Function to download and install/update luvd-shield
+install_luvd_shield() {
+    local url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-shield.sh"
+    local target="/usr/local/bin/luvd-shield"
+    
+    if [ -f "$target" ]; then
+        echo "Existing luvd-shield found, updating with latest version..."
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-shield"; exit 1; }
+        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
+        chmod +x "$target"
+        echo "luvd-shield updated at $target"
+        echo "Running luvd-shield --reset..."
+        sleep 5
+        "$target" --reset
+        figlet "Updated"
+        echo "Luveedu Shield updated successfully!"
+        # Don't exit here to allow full install/update process
+    else
+        echo "Installing luvd-shield script..."
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-shield"; exit 1; }
+        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
+        chmod +x "$target"
+        echo "luvd-shield installed at $target"
+    fi
+}
+
+# Function to set iptables rules for luvd-shield
+set_iptables_rules() {
+    echo "Setting iptables rules for luvd-shield..."
+    SERVER_IP=$(curl -s --max-time 5 http://icanhazip.com 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
+    if [ -z "$SERVER_IP" ]; then
+        echo "Failed to determine server IP for iptables rules"
+        exit 1
+    fi
+
+    iptables -F INPUT
+    iptables -N LOG_EXTERNAL 2>/dev/null || iptables -F LOG_EXTERNAL
+    iptables -A INPUT -i lo -j ACCEPT
+    iptables -A INPUT -s 127.0.0.1 -j ACCEPT
+    iptables -A INPUT -s "$SERVER_IP" -j ACCEPT
+    iptables -A INPUT -m state --state NEW -j LOG_EXTERNAL
+    iptables -A LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: "
+    echo "iptables rules set for luvd-shield (Server IP: $SERVER_IP)"
+}
+
 # Function to create and enable luvd-firewall service
-create_service() {
+create_firewall_service() {
     local service_file="/etc/systemd/system/luvd-firewall.service"
     
     if [ -f "$service_file" ]; then
-        echo "Existing luvd-firewall.service found, updating with latest version..."
+        echo "Existing luvd-firewall.service found, updating..."
     else
         echo "Creating luvd-firewall.service..."
     fi
@@ -120,13 +162,52 @@ EOF
     echo "luvd-firewall.service created/updated and enabled"
 }
 
-# Function to check system requirements and start service (only runs for new install)
+# Function to create and enable luvd-shield service
+create_shield_service() {
+    local service_file="/etc/systemd/system/luvd-shield.service"
+    
+    if [ -f "$service_file" ]; then
+        echo "Existing luvd-shield.service found, updating..."
+    else
+        echo "Creating luvd-shield.service..."
+    fi
+    
+    cat <<EOF > "$service_file"
+[Unit]
+Description=Luveedu Shield - A Realtime Bad Bots and IP Blocking Solution
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/luvd-shield --start
+ExecStop=/usr/local/bin/luvd-shield --stop
+Restart=always
+RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=3
+Type=forking
+PIDFile=/var/run/luvd-shield.pid
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable luvd-shield.service
+    sleep 2
+    systemctl start luvd-shield.service
+    echo "luvd-shield.service created/updated and enabled"
+}
+
+# Function to check system requirements and start services (only runs for new install)
 check_and_start() {
     echo "Checking system requirements..."
     
     echo "1. OS: $PKG_MANAGER-based system - OK"
     echo "2. OpenLiteSpeed: Installed - OK"
     
+    # Check luvd-firewall service
     if systemctl is-enabled luvd-firewall.service >/dev/null 2>&1; then
         echo "3. Service: luvd-firewall enabled - OK"
     else
@@ -134,35 +215,57 @@ check_and_start() {
         exit 1
     fi
     
-    sleep 5
-    echo "4. Starting luvd-firewall service..."
-    systemctl restart luvd-firewall.service
-    
-    sleep 2
     if systemctl is-active luvd-firewall.service >/dev/null 2>&1; then
-        echo "5. Service: luvd-firewall active - OK"
+        echo "4. Service: luvd-firewall active - OK"
     else
-        echo "5. Service: luvd-firewall not active - FAILED"
+        echo "4. Service: luvd-firewall not active - FAILED"
         exit 1
     fi
     
     if pgrep -f "luvd-firewall" >/dev/null; then
-        echo "6. Process: luvd-firewall running - OK"
+        echo "5. Process: luvd-firewall running - OK"
     else
-        echo "6. Process: luvd-firewall not running - FAILED"
+        echo "5. Process: luvd-firewall not running - FAILED"
         exit 1
     fi
     
-    echo "7. Running luvd-firewall --fix-logs..."
+    # Check luvd-shield service
+    if systemctl is-enabled luvd-shield.service >/dev/null 2>&1; then
+        echo "6. Service: luvd-shield enabled - OK"
+    else
+        echo "6. Service: luvd-shield not enabled - FAILED"
+        exit 1
+    fi
+    
+    if systemctl is-active luvd-shield.service >/dev/null 2>&1; then
+        echo "7. Service: luvd-shield active - OK"
+    else
+        echo "7. Service: luvd-shield not active - FAILED"
+        exit 1
+    fi
+    
+    if pgrep -f "luvd-shield" >/dev/null; then
+        echo "8. Process: luvd-shield running - OK"
+    else
+        echo "8. Process: luvd-shield not running - FAILED"
+        exit 1
+    fi
+    
+    echo "9. Running luvd-firewall --fix-logs..."
     /usr/local/bin/luvd-firewall --fix-logs
     echo "Completed luvd-firewall --fix-logs"
     
-    echo "8. Running luvd-firewall --reset..."
+    echo "10. Running luvd-firewall --reset..."
     /usr/local/bin/luvd-firewall --reset
     
+    echo "11. Running luvd-shield --reset..."
+    /usr/local/bin/luvd-shield --reset
+    
     figlet "Done"
-    echo "Successfully Installed Luveedu Firewall and It is protecting your server from DoS/DDoS Attacks!"
-    echo "Check the Logs: luvd-firewall --check-logs"
+    echo "Successfully Installed Luveedu Firewall and Shield!"
+    echo "They are protecting your server from DoS/DDoS Attacks and Bad Bots!"
+    echo "Check Firewall Logs: luvd-firewall --check-logs"
+    echo "Check Blocked IPs: luvd-shield --blocked-list"
 }
 
 # Main execution
@@ -171,6 +274,9 @@ update_system
 install_dependencies
 check_openlitespeed
 install_luvd_firewall
-# These only run if it's a new install (install_luvd_firewall doesn't exit)
-create_service
+install_luvd_shield
+set_iptables_rules
+# These only run if it's a new install (install functions don't exit unless updating)
+create_firewall_service
+create_shield_service
 check_and_start
