@@ -357,9 +357,6 @@ blocked_list() {
 # Function to clear all logs
 clear_logs() {
     echo "Clearing all Luveedu Firewall logs and resetting data..."
-    if [ -f "$PID_FILE" ]; then
-        stop
-    fi
     > "$FIREWALL_LOG"
     > "$ACCESS_LOG"
     > "$BLOCKED_IPS_FILE"
@@ -551,6 +548,8 @@ monitor_requests() {
             echo "$(date '+%Y-%m-%d %H:%M:%S') Checking access log: $ACCESS_LOG" >> "$FIREWALL_LOG"
             if [ ! -r "$ACCESS_LOG" ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') Error: Cannot read $ACCESS_LOG" >> "$FIREWALL_LOG"
+                touch "$ACCESS_LOG" || { echo "Failed to create $ACCESS_LOG"; exit 1; }
+                chown root:root "$ACCESS_LOG"
             fi
             
             local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s')
@@ -671,7 +670,6 @@ monitor_requests() {
 start() {
     if [ -f "$PID_FILE" ]; then
         echo "Luveedu Firewall is already running (PID: $(cat $PID_FILE))"
-        exit 1
     fi
     monitor_requests &>>"$FIREWALL_LOG" &
     local pid=$!
