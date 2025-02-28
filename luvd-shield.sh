@@ -25,6 +25,8 @@ block_ip() {
         iptables -A INPUT -s "$ip" -j DROP
         echo "$ip $(date +%s)" >> "$SHIELD_BLOCKED_IPS_FILE"
         log "Blocked IP $ip on all ports"
+    else
+        log "IP $ip already blocked"
     fi
 }
 
@@ -32,7 +34,7 @@ block_ip() {
 unblock_expired() {
     local now=$(date +%s)
     while read -r ip timestamp; do
-        if [ $((now - timestamp)) -ge $BLOCK_DURATION ]; then
+        if [ -n "$ip" ] && [ $((now - timestamp)) -ge $BLOCK_DURATION ]; then
             iptables -D INPUT -s "$ip" -j DROP 2>/dev/null
             sed -i "/^$ip /d" "$SHIELD_BLOCKED_IPS_FILE"
             log "Unblocked expired IP: $ip"
@@ -54,19 +56,9 @@ rotate_logs() {
 
     if [ $((now - last_rotation)) -ge $ROTATION_INTERVAL ]; then
         log "Rotating logs..."
-        > "$SHIELD_LOG"  # Clear luvd-shield.log
-        if [ -f "/var/log/syslog" ] && [ "$LOG_FILE" = "/var/log/syslog" ]; then
-            > "/var/log/syslog"
-            log "Cleared /var/log/syslog"
-        elif [ -f "/var/log/messages" ] && [ "$LOG_FILE" = "/var/log/messages" ]; then
-            > "/var/log/messages"
-            log "Cleared /var/log/messages"
-        elif [ -f "/var/log/kern.log" ] && [ "$LOG_FILE" = "/var/log/kern.log" ]; then
-            > "/var/log/kern.log"
-            log "Cleared /var/log/kern.log"
-        fi
+        mv "$SHIELD_LOG" "$SHIELD_LOG.old" && touch "$SHIELD_LOG"
+        log "Log rotation completed (only $SHIELD_LOG rotated)"
         echo "$now" > "$last_rotation_file"
-        log "Log rotation completed"
     fi
 }
 
@@ -74,7 +66,7 @@ rotate_logs() {
 blocked_list() {
     while true; do
         printf "\033c"  # Clear screen
-        echo "Luveedu Shield - Realtime Block Malicious IPs (Refreshes every 10 second)"
+        echo "Luveedu Shield - Realtime Block Malicious IPs (Refreshes every 10 seconds)"
         echo "----------------------------------------------------"
         echo "IP Address         | Blocked Since"
         echo "----------------------------------------------------"
@@ -92,19 +84,6 @@ blocked_list() {
 
 # Function to monitor connections
 monitor() {
-    # Dynamically determine the server's public IP (for logging purposes)
-    SERVER_IP=$(curl -s --max-time 5 http://icanhazip.com 2>/dev/null)
-    if [ -z "$SERVER_IP" ]; then
-        SERVER_IP=$(ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
-        if [ -z "$SERVER_IP" ]; then
-            log "Failed to determine server IP. Exiting."
-            exit 1
-        fi
-        log "Using fallback server IP: $SERVER_IP"
-    else
-        log "Detected server IP: $SERVER_IP"
-    fi
-
     # Detect kernel log file
     if [ -f "/var/log/syslog" ]; then
         LOG_FILE="/var/log/syslog"
@@ -118,23 +97,47 @@ monitor() {
     fi
     log "Using log file: $LOG_FILE"
 
-    # Monitor new connections (external only, due to iptables filtering)
     trap 'log "Monitoring stopped by signal (PID: $$)"; exit' SIGTERM SIGINT
     log "Luveedu Shield started. Monitoring: $LOG_FILE (PID: $$)"
+
+    # Sanitize LOG_FILE for use in last_pos_file name
+    local sanitized_log_file=$(echo "$LOG_FILE" | tr '/' '_')
+    local last_pos_file="/var/tmp/luvd-shield-last-pos-$sanitized_log_file"
+    local last_pos=0
+
+    # Initialize last position file if it doesn’t exist
+    [ -f "$last_pos_file" ] || echo "0" > "$last_pos_file"
+    last_pos=$(cat "$last_pos_file" 2>/dev/null || echo "0")
+
     while [ -f "$PID_FILE" ]; do
-        tail -f "$LOG_FILE" | grep "NEW_CONNECTION" | awk '{print $10}' | sed 's/SRC=//' | while read -r ip; do
-            if ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
-                response=$(curl -s --max-time 2 "$CHECK_API$ip")
-                if [ "$response" = "BLACKLIST" ]; then
-                    block_ip "$ip"
-                else
-                    log "IP $ip not blacklisted (response: $response)"
+        # Check if log file exists and is readable
+        if [ ! -r "$LOG_FILE" ]; then
+            log "Log file $LOG_FILE is not readable or missing. Exiting."
+            exit 1
+        fi
+
+        # Get current line count
+        local current_lines=$(wc -l "$LOG_FILE" 2>/dev/null | awk '{print $1}' || echo "0")
+        if [ "$current_lines" -gt "$last_pos" ]; then
+            tail -n +"$((last_pos + 1))" "$LOG_FILE" | grep "NEW_CONNECTION" | awk '{print $10}' | sed 's/SRC=//' | while read -r ip; do
+                if [ -n "$ip" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
+                    log "Checking IP: $ip"
+                    response=$(curl -s --max-time 2 "$CHECK_API$ip")
+                    if [ "$response" = "BLACKLIST" ]; then
+                        block_ip "$ip"
+                    else
+                        log "IP $ip not blacklisted (response: $response)"
+                    fi
                 fi
-            fi
-        done
+            done
+            # Update last position only if successful
+            echo "$current_lines" > "$last_pos_file" 2>/dev/null || log "Failed to update $last_pos_file"
+            last_pos="$current_lines"
+        fi
+
         unblock_expired
         rotate_logs
-        sleep 60  # Check for expired IPs and rotate logs every minute
+        sleep 1
     done
     log "Monitoring stopped due to stop command (PID: $$)"
 }
@@ -201,18 +204,10 @@ reset() {
     # Clear logs and blocked IPs file
     > "$SHIELD_BLOCKED_IPS_FILE"
     > "$SHIELD_LOG"
-    if [ -f "/var/log/syslog" ]; then
-        > "/var/log/syslog"
-        log "Cleared /var/log/syslog"
-    elif [ -f "/var/log/messages" ]; then
-        > "/var/log/messages"
-        log "Cleared /var/log/messages"
-    elif [ -f "/var/log/kern.log" ]; then
-        > "/var/log/kern.log"
-        log "Cleared /var/log/kern.log"
-    fi
+    rm -f /var/tmp/luvd-shield-last-pos-*
     sleep 2
-    # Restart the service
+    fix_all
+    sleep 2
     start
     log "Luveedu Shield reset complete and restarted."
     echo "Luveedu Shield reset complete."
@@ -227,9 +222,7 @@ fix_all() {
         echo "Failed to determine server IP for iptables rules"
         exit 1
     fi
-
-    # Check if rules exist, if not add them
-    iptables -F INPUT
+    
     if ! iptables -L LOG_EXTERNAL -n 2>/dev/null; then
         iptables -N LOG_EXTERNAL
     else
@@ -259,16 +252,12 @@ update() {
     local github_url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-shield.sh"
     local script_path="/usr/local/bin/luvd-shield"
     
-    # Fetch new script content
     if curl -s --max-time 10 "$github_url" > "$script_path.tmp"; then
-        # Replace current script with new content
         mv "$script_path.tmp" "$script_path"
         sudo sed -i 's/\r$//' "$script_path"
         chmod +x "$script_path"
         log "Script updated successfully!"
         echo "Script updated successfully!"
-        
-        # Wait and reset
         sleep 2
         "$script_path" --reset
     else
