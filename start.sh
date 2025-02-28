@@ -67,7 +67,9 @@ install_luvd_firewall() {
         echo "luvd-firewall updated at $target"
         # Just reset since it already existed
         echo "Running luvd-firewall --reset..."
+        sleep 5
         "$target" --reset
+        sleep 2
         figlet "Updated"
         echo "Luveedu Firewall updated successfully!"
         exit 0
