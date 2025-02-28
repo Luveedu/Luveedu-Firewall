@@ -142,11 +142,8 @@ After=network.target
 [Service]
 ExecStart=/usr/local/bin/luvd-firewall --start
 ExecStop=/usr/local/bin/luvd-firewall --stop
-Restart=always
-RestartSec=5s
-StartLimitIntervalSec=60s
-StartLimitBurst=3
-Type=forking
+Restart=on-failure
+Type=forking 
 PIDFile=/var/run/luvd-firewall.pid
 TimeoutStartSec=30
 TimeoutStopSec=30
@@ -181,11 +178,8 @@ After=network.target
 [Service]
 ExecStart=/usr/local/bin/luvd-shield --start
 ExecStop=/usr/local/bin/luvd-shield --stop
-Restart=always
-RestartSec=5s
-StartLimitIntervalSec=60s
-StartLimitBurst=3
-Type=forking
+Restart=on-failure
+Type=forking 
 PIDFile=/var/run/luvd-shield.pid
 TimeoutStartSec=30
 TimeoutStopSec=30

@@ -304,8 +304,8 @@ release_ip() {
 
 # Function to reset the firewall service
 reset() {
-    systemctl stop luvd-firewall 2>/dev/null || echo "Systemd stop failed, continuing..."
     echo "Resetting Luveedu Firewall..."
+    systemctl stop luvd-firewall 2>/dev/null || echo "Systemd stop failed, continuing..."
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE")
         if kill -TERM "$pid" 2>/dev/null; then
