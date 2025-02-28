@@ -52,25 +52,32 @@ check_openlitespeed() {
     fi
 }
 
-# Function to download and install luvd-firewall
+# Function to download and install/update luvd-firewall
 install_luvd_firewall() {
     local url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-firewall.sh"
     local target="/usr/local/bin/luvd-firewall"
     
-    echo "Downloading luvd-firewall from $url..."
     if [ -f "$target" ]; then
-        echo "Updating existing luvd-firewall script..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download script"; exit 1; }
+        echo "Existing luvd-firewall found, updating with latest version..."
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update script"; exit 1; }
+        # Convert Windows CRLF to Unix LF
+        sudo sed -i 's/\r$//' "$target"
+        chmod +x "$target"
+        echo "luvd-firewall updated at $target"
+        # Just reset since it already existed
+        echo "Running luvd-firewall --reset..."
+        "$target" --reset
+        figlet "Updated"
+        echo "Luveedu Firewall updated successfully!"
+        exit 0
     else
         echo "Installing luvd-firewall script..."
         wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download script"; exit 1; }
+        # Convert Windows CRLF to Unix LF
+        sudo sed -i 's/\r$//' "$target"
+        chmod +x "$target"
+        echo "luvd-firewall installed at $target"
     fi
-    
-    # Convert Windows CRLF to Unix LF
-    sudo sed -i 's/\r$//' /usr/local/bin/luvd-firewall
-    
-    chmod +x "$target"
-    echo "luvd-firewall installed/updated at $target"
 }
 
 # Function to create and enable luvd-firewall service
@@ -99,17 +106,13 @@ EOF
     echo "luvd-firewall.service created and enabled"
 }
 
-# Function to check system requirements and start service
+# Function to check system requirements and start service (only runs for new install)
 check_and_start() {
     echo "Checking system requirements..."
     
-    # 1. OS Check (already done)
     echo "1. OS: $PKG_MANAGER-based system - OK"
-    
-    # 2. OpenLiteSpeed Check (already done)
     echo "2. OpenLiteSpeed: Installed - OK"
     
-    # 3. Service Enabled
     if systemctl is-enabled luvd-firewall.service >/dev/null 2>&1; then
         echo "3. Service: luvd-firewall enabled - OK"
     else
@@ -117,12 +120,10 @@ check_and_start() {
         exit 1
     fi
     
-    # 4. Start Service
     sleep 5
     echo "4. Starting luvd-firewall service..."
     systemctl restart luvd-firewall.service
     
-    # 5. Check if Service is Active
     sleep 2
     if systemctl is-active luvd-firewall.service >/dev/null 2>&1; then
         echo "5. Service: luvd-firewall active - OK"
@@ -131,7 +132,6 @@ check_and_start() {
         exit 1
     fi
     
-    # 6. Check if Process is Running
     if pgrep -f "luvd-firewall" >/dev/null; then
         echo "6. Process: luvd-firewall running - OK"
     else
@@ -139,16 +139,13 @@ check_and_start() {
         exit 1
     fi
     
-    # 7. Run --fix-logs
     echo "7. Running luvd-firewall --fix-logs..."
     /usr/local/bin/luvd-firewall --fix-logs
     echo "Completed luvd-firewall --fix-logs"
     
-    # 8. Run --reset
     echo "8. Running luvd-firewall --reset..."
     /usr/local/bin/luvd-firewall --reset
     
-    # 9. Display Success Message
     figlet "Done"
     echo "Successfully Installed Luveedu Firewall and It is protecting your server from DoS/DDoS Attacks!"
     echo "Check the Logs: luvd-firewall --check-logs"
@@ -160,5 +157,6 @@ update_system
 install_dependencies
 check_openlitespeed
 install_luvd_firewall
+# These only run if it's a new install (install_luvd_firewall doesn't exit)
 create_service
 check_and_start
