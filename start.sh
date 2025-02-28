@@ -26,9 +26,10 @@ check_os() {
 update_system() {
     echo "Updating system..."
     if [ "$PKG_MANAGER" = "apt" ]; then
-        apt update && apt upgrade -y
+        apt update
     elif [ "$PKG_MANAGER" = "dnf" ]; then
-        dnf update -y
+        dnf clean all
+        dnf check-update
     fi
 }
 
