@@ -489,7 +489,8 @@ check_logs() {
     done
 }
 
-# Function to rotate logs every 5 minutes
+
+# Function to rotate logs every 5 minutes using clear_logs
 rotate_logs() {
     local now=$(date +%s)
     local last_rotation_file="/var/tmp/luvd-firewall-last-rotation.txt"
@@ -504,25 +505,14 @@ rotate_logs() {
     
     # Check if 5 minutes (300 seconds) have passed since last rotation
     if [ $((now - last_rotation)) -ge 300 ]; then
-        # Rotate firewall log
-        if [ -f "$FIREWALL_LOG" ] && [ -s "$FIREWALL_LOG" ]; then
-            mv "$FIREWALL_LOG" "$FIREWALL_LOG.$(date '+%Y%m%d_%H%M%S')"
-            touch "$FIREWALL_LOG"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Log rotated: $FIREWALL_LOG" >> "$FIREWALL_LOG"
-        fi
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Initiating log rotation..." >> "$FIREWALL_LOG"
         
-        # Rotate access log
-        if [ -f "$ACCESS_LOG" ] && [ -s "$ACCESS_LOG" ]; then
-            mv "$ACCESS_LOG" "$ACCESS_LOG.$(date '+%Y%m%d_%H%M%S')"
-            touch "$ACCESS_LOG"
-            chown lsadm:lsadm "$ACCESS_LOG"  # Maintain correct ownership
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Access log rotated: $ACCESS_LOG" >> "$FIREWALL_LOG"
-            # Reset last line tracking since we're starting a new log
-            echo "0" > "$LAST_LINE_FILE"
-        fi
+        # Use the existing clear_logs function to clear all logs
+        clear_logs
         
         # Update last rotation time
         echo "$now" > "$last_rotation_file"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Log rotation completed: All logs cleared" >> "$FIREWALL_LOG"
     fi
 }
 
