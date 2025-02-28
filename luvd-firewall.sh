@@ -304,29 +304,31 @@ release_ip() {
 
 # Function to reset the firewall service
 reset() {
+    systemctl stop luvd-firewall 2>/dev/null || echo "Systemd stop failed, continuing..."
     echo "Resetting Luveedu Firewall..."
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE")
         if kill -TERM "$pid" 2>/dev/null; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') Stopped firewall process (PID: $pid)" >> "$FIREWALL_LOG"
             rm -f "$PID_FILE"
-            sleep 1
+            sleep 6
         else
             echo "Failed to stop firewall process (PID: $pid), proceeding anyway..."
         fi
     fi
-    
-    systemctl stop luvd-firewall 2>/dev/null || echo "Systemd stop failed, continuing..."
+
     systemctl daemon-reload
-    systemctl restart lsws
-    echo "Restarted OpenLiteSpeed Webserver"
     echo "Clearing all Luveedu Firewall logs and resetting data..."
     > "$FIREWALL_LOG"
     > "$ACCESS_LOG"
     > "$BLOCKED_IPS_FILE"
     > "$LAST_LINE_FILE"
+
+    systemctl restart lsws
+    echo "Restarted OpenLiteSpeed Webserver"
+
     iptables -F INPUT 2>/dev/null
-    
+
     while read -r entry timestamp; do
         iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
     done < "$BLOCKED_IPS_FILE"

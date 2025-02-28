@@ -157,8 +157,9 @@ EOF
     
     systemctl daemon-reload
     systemctl enable luvd-firewall.service
-    sleep 2
+    sleep 5
     systemctl start luvd-firewall.service
+    sleep 7
     echo "luvd-firewall.service created/updated and enabled"
 }
 
@@ -195,7 +196,7 @@ EOF
     
     systemctl daemon-reload
     systemctl enable luvd-shield.service
-    sleep 2
+    sleep 6
     systemctl start luvd-shield.service
     echo "luvd-shield.service created/updated and enabled"
 }
