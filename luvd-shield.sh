@@ -106,10 +106,10 @@ monitor() {
 
     local last_rotation=0
 
-    # Use stdbuf to disable buffering and tail with -F for better real-time tracking
     stdbuf -o0 tail -F "$LOG_FILE" 2>/dev/null | while true; do
         read -r line || { log "tail pipeline failed or EOF reached"; break; }
-        ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk '{print $10}' | sed 's/SRC=//')
+        # Extract IP from SRC= field explicitly
+        ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk -F 'SRC=' '{print $2}' | awk '{print $1}' | sed 's/DST=.*//')
         if [ -n "$ip" ] && [ "$ip" != "$SERVER_IP" ] && [ "$ip" != "127.0.0.1" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
             response=$(curl -s --max-time 2 "$CHECK_API$ip")
             if [ "$response" = "BLACKLIST" ]; then
@@ -135,7 +135,8 @@ monitor() {
             kill $TAIL_PID 2>/dev/null
             stdbuf -o0 tail -F "$LOG_FILE" 2>/dev/null | while true; do
                 read -r line || { log "tail pipeline failed or EOF reached"; break; }
-                ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk '{print $10}' | sed 's/SRC=//')
+                # Extract IP from SRC= field explicitly
+                ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk -F 'SRC=' '{print $2}' | awk '{print $1}' | sed 's/DST=.*//')
                 if [ -n "$ip" ] && [ "$ip" != "$SERVER_IP" ] && [ "$ip" != "127.0.0.1" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
                     response=$(curl -s --max-time 2 "$CHECK_API$ip")
                     if [ "$response" = "BLACKLIST" ]; then
