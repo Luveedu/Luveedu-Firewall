@@ -234,9 +234,29 @@ block_blacklist() {
     done < "$BLOCKED_IPS_FILE"
 }
 
+# Function to preserve and restore the LUVEEDU-SHIELD LOG rule
+preserve_log_rule() {
+    if iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
+        LOG_RULE_EXISTS=true
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Preserving LUVEEDU-SHIELD LOG rule" >> "$FIREWALL_LOG"
+    else
+        LOG_RULE_EXISTS=false
+    fi
+}
+
+restore_log_rule() {
+    if [ "$LOG_RULE_EXISTS" = true ]; then
+        if ! iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
+            iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Restored LUVEEDU-SHIELD LOG rule" >> "$FIREWALL_LOG"
+        fi
+    fi
+}
+
 # Function to unblock expired IPs and CIDRs
 unblock_expired() {
     local now=$(date +%s)
+    preserve_log_rule
     while read -r entry timestamp; do
         if [ $((now - timestamp)) -ge $BLOCK_DURATION ]; then
             iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
@@ -248,11 +268,13 @@ unblock_expired() {
             fi
         fi
     done < "$BLOCKED_IPS_FILE"
+    restore_log_rule
 }
 
 # Function to release all blocked IPs and clear logs
 release_all() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Releasing all blocked IPs and clearing logs..." >> "$FIREWALL_LOG"
+    preserve_log_rule
     while read -r entry timestamp; do
         iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
         if [[ "$entry" =~ /24$ ]]; then
@@ -266,6 +288,7 @@ release_all() {
     > "$ACCESS_LOG"
     > "$LAST_LINE_FILE"
     iptables -F INPUT 2>/dev/null
+    restore_log_rule
     echo "$(date '+%Y-%m-%d %H:%M:%S') All IPs released from iptables and blocklist, logs cleared." >> "$FIREWALL_LOG"
 }
 
@@ -277,6 +300,7 @@ release_ip() {
         exit 1
     fi
     
+    preserve_log_rule
     if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
         # Handle CIDR
         if iptables -D INPUT -s "$input" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
@@ -300,6 +324,7 @@ release_ip() {
         echo "Invalid IP or CIDR format. Use --release-ip <IP> or --release-ip <IP/CIDR> (e.g., --release-ip 8.8.8.8 or --release-ip 8.8.8.8/24)"
         exit 1
     fi
+    restore_log_rule
 }
 
 # Function to reset the firewall service
@@ -327,12 +352,14 @@ reset() {
     systemctl restart lsws
     echo "Restarted OpenLiteSpeed Webserver"
 
+    preserve_log_rule
     iptables -F INPUT 2>/dev/null
-
     while read -r entry timestamp; do
         iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
     done < "$BLOCKED_IPS_FILE"
     > "$BLOCKED_IPS_FILE"
+    restore_log_rule
+
     echo "$(date '+%Y-%m-%d %H:%M:%S') All IPs released and logs cleared." >> "$FIREWALL_LOG"
     
     systemctl start luvd-firewall 2>/dev/null || echo "Service start failed, check systemd configuration."
@@ -357,11 +384,13 @@ blocked_list() {
 # Function to clear all logs
 clear_logs() {
     echo "Clearing all Luveedu Firewall logs and resetting data..."
+    preserve_log_rule
     > "$FIREWALL_LOG"
     > "$ACCESS_LOG"
     > "$BLOCKED_IPS_FILE"
     > "$LAST_LINE_FILE"
     iptables -F INPUT 2>/dev/null
+    restore_log_rule
     echo "All logs cleared and firewall data reset."
 }
 
@@ -450,7 +479,6 @@ check_logs() {
             if [ -n "$ip" ] && [ -n "$timestamp" ]; then
                 ts_seconds=$(date -d "$timestamp" +%s 2>/dev/null)
                 if [ -n "$ts_seconds" ] && [ "$ts_seconds" -ge "$cutoff" ]; then
-                    # Check if IP is within a blocked CIDR
                     if is_ip_in_blocked_cidr "$ip"; then
                         ip_status[$ip]="Blocked (within CIDR)"
                         ip_win_count[$ip]="-"
@@ -488,28 +516,21 @@ check_logs() {
     done
 }
 
-
 # Function to rotate logs every 5 minutes using clear_logs
 rotate_logs() {
     local now=$(date +%s)
     local last_rotation_file="/var/tmp/luvd-firewall-last-rotation.txt"
     local last_rotation=0
     
-    # Initialize last rotation time if file doesn't exist
     if [ ! -f "$last_rotation_file" ]; then
         echo "$now" > "$last_rotation_file"
     else
         last_rotation=$(cat "$last_rotation_file")
     fi
     
-    # Check if 5 minutes (300 seconds) have passed since last rotation
     if [ $((now - last_rotation)) -ge 300 ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') Initiating log rotation..." >> "$FIREWALL_LOG"
-        
-        # Use the existing clear_logs function to clear all logs
         clear_logs
-        
-        # Update last rotation time
         echo "$now" > "$last_rotation_file"
         echo "$(date '+%Y-%m-%d %H:%M:%S') Log rotation completed: All logs cleared" >> "$FIREWALL_LOG"
     fi
@@ -646,13 +667,7 @@ monitor_requests() {
                     unset ip_timestamps["$ip,"*]
                 fi
             done
-
-            # Remove the existing log trimming and replace with rotation
-            # local cutoff_time=$(date -d '-5 minutes' '+%d/%b/%Y:%H:%M:%S')
-            # grep -B 10000 "$cutoff_time" "$ACCESS_LOG" > "$TEMP_LOG" && sudo mv "$TEMP_LOG" "$ACCESS_LOG"
-            # sudo chown lsadm:lsadm "$ACCESS_LOG"
             
-            # Call log rotation
             rotate_logs
         else
             echo "$(date '+%Y-%m-%d %H:%M:%S') Access log $ACCESS_LOG not found" >> "$FIREWALL_LOG"
@@ -700,6 +715,54 @@ stop() {
     fi
 }
 
+# Function to update the script from GitHub and reset
+update() {
+    local script_path="/usr/local/bin/luvd-firewall"
+    local github_url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-firewall.sh"
+    local temp_file="/tmp/luvd-firewall-update.sh"
+
+    echo "Updating Luveedu Firewall from GitHub..."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Starting update process from $github_url" >> "$FIREWALL_LOG"
+
+    # Download the latest version
+    if curl -s --max-time 10 "$github_url" -o "$temp_file" 2>/dev/null; then
+        if [ -s "$temp_file" ]; then
+            # Verify it's a valid bash script
+            if head -n 1 "$temp_file" | grep -q '^#!/bin/bash'; then
+                # Backup current script
+                cp "$script_path" "$script_path.bak.$(date +%F_%T)"
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Backed up current script to $script_path.bak.$(date +%F_%T)" >> "$FIREWALL_LOG"
+
+                # Install new version
+                chmod +x "$temp_file"
+                mv "$temp_file" "$script_path"
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Successfully updated script from GitHub" >> "$FIREWALL_LOG"
+
+                # Perform reset
+                echo "Performing reset after update..."
+                reset
+
+                echo "Update and reset completed successfully."
+            else
+                echo "Error: Downloaded file is not a valid bash script"
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Update failed: Downloaded file is not a valid bash script" >> "$FIREWALL_LOG"
+                rm -f "$temp_file"
+                exit 1
+            fi
+        else
+            echo "Error: Downloaded file is empty"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Update failed: Downloaded file is empty" >> "$FIREWALL_LOG"
+            rm -f "$temp_file"
+            exit 1
+        fi
+    else
+        echo "Error: Failed to download update from GitHub"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Update failed: Could not download from $github_url" >> "$FIREWALL_LOG"
+        rm -f "$temp_file"
+        exit 1
+    fi
+}
+
 # CLI handling
 case "$1" in
     --start) start ;;
@@ -718,8 +781,9 @@ case "$1" in
     --blocked-list) blocked_list ;;
     --clear-logs) clear_logs ;;
     --reset) reset ;;
+    --update) update ;;
     *)
-        echo "Usage: luvd-firewall [--start | --stop | --fix-logs | --release-all | --release-ip <IP or CIDR> | --check-logs | --check-ip <IP or CIDR> | --blocked-list | --clear-logs | --reset]"
+        echo "Usage: luvd-firewall [--start | --stop | --fix-logs | --release-all | --release-ip <IP or CIDR> | --check-logs | --check-ip <IP or CIDR> | --blocked-list | --clear-logs | --reset | --update]"
         exit 1
         ;;
 esac
