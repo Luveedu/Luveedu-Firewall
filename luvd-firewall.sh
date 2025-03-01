@@ -368,7 +368,7 @@ reset() {
 
 # Function to display blocked IP list
 blocked_list() {
-    echo "Currently blocked IPs:"
+    echo "Blocked IPs by Luveedu Firewall - DoS Blocking"
     if [ -s "$BLOCKED_IPS_FILE" ]; then
         echo "IP Address/CIDR   Blocked Since"
         echo "------------------  -------------------"
@@ -420,7 +420,7 @@ fix_logs() {
 
 # Enhanced check_logs function
 check_logs() {
-    echo "Monitoring firewall logs:"
+    echo "Luveedu Firewall - DoS Blocking (Realtime)"
     echo "------------------------------------------------------------"
     echo "IP Address        | Requests/30s | Status"
     echo "------------------------------------------------------------"
@@ -499,7 +499,7 @@ check_logs() {
         fi
         
         printf "\033c"
-        echo "Monitoring firewall logs:"
+        echo "Luveedu Firewall - DoS Blocking (Realtime)"
         echo "------------------------------------------------------------"
         echo "IP Address        | Requests/30s | Status"
         echo "------------------------------------------------------------"
@@ -783,7 +783,19 @@ case "$1" in
     --reset) reset ;;
     --update) update ;;
     *)
-        echo "Usage: luvd-firewall [--start | --stop | --fix-logs | --release-all | --release-ip <IP or CIDR> | --check-logs | --check-ip <IP or CIDR> | --blocked-list | --clear-logs | --reset | --update]"
+        
+            echo "Usage: luvd-firewall [OPTION] [ARGUMENT]"
+    echo " --start              - It starts the Firewall"
+    echo " --stop               - It stops the Firewall"
+    echo " --check-logs         - Monitor the Rate Limiting Stats"
+    echo " --blocked-list       - Check the Blocked IPs"
+    echo " --fix-logs           - Fix the vHosts to log in access.log file"
+    echo " --reset              - If the Firewall is not Working Simply Reset the Configuration"
+    echo " --update             - Update the Script to the Latest Version from Github"
+    echo " --release-all       - Unblock all the IPs from iptables"
+    echo " --release-ip 8.8.8.8 - Unblock any particular IP or Range"
+    echo " --check-ip 8.8.8.8   - It will detect if the IP is BLACKLISTED OR WHITELISTED OR NONE"
+    echo " --clear-logs         - It will clear all the previous logs"
         exit 1
         ;;
 esac
