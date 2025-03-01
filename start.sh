@@ -113,13 +113,13 @@ set_iptables_rules() {
         echo "Failed to determine server IP for iptables rules"
         exit 1
     fi
-
+    iptables -A INPUT -i lo -j ACCEPT
     if ! iptables -L LOG_EXTERNAL -n 2>/dev/null; then
         iptables -N LOG_EXTERNAL
     else
         iptables -F LOG_EXTERNAL
     fi
-    iptables -A INPUT -i lo -j ACCEPT
+
     if ! iptables -C INPUT -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
         iptables -A INPUT -s 127.0.0.1 -j ACCEPT
     fi
