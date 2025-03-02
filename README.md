@@ -23,7 +23,7 @@ Luveedu Firewall offers several advantages for protecting your OpenLiteSpeed ser
 
 -  **Rate Limiting**: Blocks IPs that exceed a predefined number of requests within a specified time window.
 
--  **Whitelist/Blacklist Support**: Integrates with an Luveedu Cloud API to whitelist trusted IPs and blacklist malicious ones. It will never Block Google Bots, Bing Bots, Yahoo Bots, Any Known Search Bots, All Popular CDN IPs and Scanners. It will Block IPs rated Spam by Spamhaus and Comodo. ( Request API: https://waf.luveedu.cloud/checkip.php?ip=1.1.1.1 ) - Maintained by Luveedu Cloud & Free to Use.
+-  **Whitelist/Blacklist Support**: Integrates with an Luveedu Cloud API to whitelist trusted IPs and blacklist malicious ones. It will never Block Google Bots, Bing Bots, Yahoo Bots, Any Known Search Bots, All Popular CDN IPs and Scanners. It will Block IPs rated Spam by Spamhaus and Comodo. ( Request API: https://waf.luveedu.cloud/checkip.php?ip=1.1.1.1 ) - Maintained by [Luveedu Cloud](https://cloud.luveedu.com) & Free to Use.
 
 -  **CIDR Blocking**: Automatically blocks entire IP ranges if a specific IP exceeds limits.
 
@@ -32,7 +32,7 @@ Luveedu Firewall offers several advantages for protecting your OpenLiteSpeed ser
 -  **Lightweight**: Designed to run efficiently without consuming excessive server resources.
 
   
-  
+
 
 &nbsp;
 
