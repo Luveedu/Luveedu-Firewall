@@ -142,24 +142,76 @@ Below is a detailed explanation of the available CLI options for managing and mo
 ```luvd-shield --update``` - Update the Script to the Latest Version from Github
 
 
+
+
+
+
+&nbsp;
+
+## Luveedu AV ( Antivirus ) - Malware Scanning & Removal by ClamAV & Comodo ( Addon )
+
+Luveedu AV ( Antivirus ) is a powerful and super strong malware scanning and removal tool by Luveedu Firewall. You can easily scan, detect, disinfect and remove malicious files. Its that simple and easy. You can always try system scanning, mail scanning, Database Scanning, 100+ File types support. Custom Comodo ClamAV Signatures for refinement. Best Positive Rate & Great Way to Resolve all malware issues.
+
+Below is a detailed explanation of the available CLI options for managing and monitoring the Luveedu Shield tool.
+
+**Main Usage**
+
+```luvd-antivirus --start``` - It starts the Scanning Engine & Do a Initial Scan
+
+```luvd-antivirus --stop``` - It stops the Running Scans & the Scannng Engine
+
+```luvd-antivirus --check-logs``` - Check the Running Scanning Logs
+
+```luvd-antivirus --check-logs --rkhunter``` - Current Scanning Logs of RKHUNTER ( Rookit Injections )
+
+```luvd-antivirus --check-stats``` - Last 10 Scanning Results
+
+
+&nbsp;
+
+**Scanning Usage**
+
+```luvd-antivirus --scan``` - It will Start Scanning the Entire Home Directory
+
+```luvd-antivirus --scan --domains``` - It will only scan any selected domain
+
+```luvd-antivirus --scan --main``` - It will Only Scan the Emails & Attachments
+
+```luvd-antivirus --scan --folder /home/customer-folder``` - It will Only Scan the Specified Folder inside /home/
+
+```luvd-antivirus --scan --rootkit``` - It will do a force scan using RKHUNTER for Rootkits
+
+```luvd-antivirus --stop-scan``` - It will immediately Stop the Scanning
+
+```luvd-antivirus --infected-files``` - Check the Infected Files currently in Quarantine
+
+```luvd-antivirus --remove-all``` - You can permanantly delete all Infected files from Quarantine
+
+```luvd-antivirus --restore filename.png``` - It can restore the Quarantine Files to its actual Location
+
+
+&nbsp;
+
+**Basic Usage**
+
+```luvd-antivirus --update``` - It will update the Luveedu Antivirus Script
+
+```luvd-antivirus --clear-logs``` - It can clear all Unwanted Luveedu Antivirus Logs
+
+
+
 &nbsp;
 
 ## 5. Future Plans
 
-  
-
 We are improving it day by day, we will implement so many things. Some of our thoughts.
 
 
-1. Improved Layout
+1. GUI Layout
 2. Web Dashboard
-3. Faster Processing
-4. Faster Blocking
 5. Proper Blocking WAF using ModSecurity
 6. SQL and XSS Prevention
 7. Bruteforce Prevention
-8. Antivirus & Malware Scanning
-9. DDoS Protection Layer 7 ( Recaptcha Based )
 
   
   
