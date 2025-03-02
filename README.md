@@ -105,7 +105,7 @@ Below is a detailed explanation of the available CLI options for managing and mo
 
 &nbsp;
 
-### Luveedu Shield - Realtime Block Malicious Bots & Reduce Load
+## Luveedu Shield - Realtime Block Malicious Bots & Reduce Load ( Addon )
 
 Luveedu Shield is a Addon for Luveedu Firewall, Which runs in background and scanns the syslog file to detect the IPs those are rated as malicious and we use Comodo and OSWAP to find the Blacklisted BOT IPs and Block them directly from the Kernal, hence you are totally safe and it will reduce server Load.
 
