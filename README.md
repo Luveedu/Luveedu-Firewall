@@ -20,7 +20,7 @@ The Luveedu Firewall is a robust DoS and DDoS prevention tool designed for OpenL
 ### Guides & Installation
 [Installation](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#4-installation)
 
-Guides for: [Luveedu Firewall](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#luveedu-firewall---usage-options)
+Guides for: [Luveedu Firewall](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#luveedu-firewall---ddos--dos-blocking--super-powerful-)
 //
 [Luveedu Shield](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#luveedu-shield---realtime-block-malicious-bots--reduce-load--addon-)
 //
