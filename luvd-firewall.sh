@@ -368,7 +368,7 @@ reset() {
 
 # Function to display blocked IP list
 blocked_list() {
-    echo "Currently blocked IPs:"
+    echo "Luveedu Firewall - DoS / DDoS Blocked IP List"
     if [ -s "$BLOCKED_IPS_FILE" ]; then
         echo "IP Address/CIDR   Blocked Since"
         echo "------------------  -------------------"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# start.sh - Installation script for Luveedu Firewall and Shield
+# start.sh - Installation script for Luveedu Firewall, Shield, and Antivirus
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -8,143 +8,174 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Log file setup
+LOG_FILE="luvd-firewall-installation-$(date '+%Y-%m-%d_%H-%M-%S').log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Function to display header
+display_header() {
+    echo "----------------------------------------------------------"
+    echo "                   Luveedu Firewall System                "
+    echo "----------------------------------------------------------"
+    echo
+}
+
+# Function to display step
+display_step() {
+    echo -n "[ ] $1..."
+}
+
+# Function to mark step as done
+mark_done() {
+    echo -e "\r[\e[32m✔\e[0m] $1...Done"
+}
+
+# Function to mark step as failed
+mark_failed() {
+    echo -e "\r[\e[31m✘\e[0m] $1...Failed"
+    exit 1
+}
+
+# Function to display completion
+display_completion() {
+    echo
+    echo "//////////// COMPLETED \\\\\\\\\\\\\\\"
+    echo "For more information visit: https://github.com/Luveedu/Luveedu-Firewall"
+    echo "Installation Log saved in: $LOG_FILE"
+}
+
+# Function to display failure
+display_failure() {
+    echo
+    echo "//////////////// FAILED \\\\\\\\\\\\\\\\\\\"
+    echo "Installation failed. Check the log for details: $LOG_FILE"
+    exit 1
+}
+
 # Function to check OS type
 check_os() {
+    display_step "Checking the System Requirements"
     if [ -f /etc/debian_version ]; then
-        echo "Debian-based OS detected"
+        echo "Debian-based OS detected" >> "$LOG_FILE"
         PKG_MANAGER="apt"
     elif [ -f /etc/redhat-release ]; then
-        echo "RHEL-based OS detected"
+        echo "RHEL-based OS detected" >> "$LOG_FILE"
         PKG_MANAGER="dnf"
     else
-        echo "Unsupported OS. This script supports Debian-based (apt) or RHEL-based (dnf) systems only."
-        exit 1
+        echo "Unsupported OS" >> "$LOG_FILE"
+        mark_failed "Checking the System Requirements"
     fi
+    mark_done "Checking the System Requirements"
 }
 
 # Function to update system
 update_system() {
-    echo "Updating system..."
+    display_step "Updating Linux System"
     if [ "$PKG_MANAGER" = "apt" ]; then
-        apt update
+        apt update || mark_failed "Updating Linux System"
     elif [ "$PKG_MANAGER" = "dnf" ]; then
-        dnf clean all
-        dnf check-update
+        dnf clean all && dnf check-update || mark_failed "Updating Linux System"
     fi
+    mark_done "Updating Linux System"
 }
 
 # Function to install dependencies
 install_dependencies() {
-    echo "Installing dependencies: iptables, wget, curl, figlet..."
+    display_step "Installing Dependencies"
+    echo "Installing iptables, wget, curl, figlet..." >> "$LOG_FILE"
     if [ "$PKG_MANAGER" = "apt" ]; then
-        apt install -y iptables wget curl figlet
+        apt install -y iptables wget curl figlet || mark_failed "Installing Dependencies"
     elif [ "$PKG_MANAGER" = "dnf" ]; then
-        dnf install -y iptables wget curl figlet
+        dnf install -y iptables wget curl figlet || mark_failed "Installing Dependencies"
     fi
+    mark_done "Installing Dependencies"
 }
 
 # Function to check if OpenLiteSpeed is installed
 check_openlitespeed() {
+    display_step "Checking OpenLiteSpeed"
     if [ -d "/usr/local/lsws" ] && [ -x "/usr/local/lsws/bin/lshttpd" ]; then
-        echo "OpenLiteSpeed detected"
+        echo "OpenLiteSpeed detected" >> "$LOG_FILE"
     else
-        echo "OpenLiteSpeed not found. This script requires OpenLiteSpeed to be installed."
-        exit 1
+        echo "OpenLiteSpeed not found" >> "$LOG_FILE"
+        mark_failed "Checking OpenLiteSpeed"
     fi
+    mark_done "Checking OpenLiteSpeed"
 }
 
 # Function to download and install/update luvd-firewall
 install_luvd_firewall() {
+    display_step "Installing Luveedu Firewall"
     local url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-firewall.sh"
     local target="/usr/local/bin/luvd-firewall"
     
     if [ -f "$target" ]; then
-        echo "Existing luvd-firewall found, updating with latest version..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-firewall"; exit 1; }
-        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
+        echo "Existing luvd-firewall found, updating..." >> "$LOG_FILE"
+        read -p "Would You Like to Re-configure vHost Logging? (y/N): " choice
+        case "$choice" in
+            y|Y)
+                echo "User chose to re-configure vHost logging" >> "$LOG_FILE"
+                ;;
+            *)
+                echo "Skipping vHost re-configuration" >> "$LOG_FILE"
+                ;;
+        esac
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-firewall" >> "$LOG_FILE"; mark_failed "Installing Luveedu Firewall"; }
+        sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
-        echo "luvd-firewall updated at $target"
-        echo "Running luvd-firewall --reset..."
-        sleep 5
-        "$target" --reset
-        figlet "Updated"
-        echo "Luveedu Firewall updated successfully!"
-        # Don't exit here to allow luvd-shield installation
+        echo "luvd-firewall updated at $target" >> "$LOG_FILE"
+        "$target" --reset || mark_failed "Installing Luveedu Firewall"
+        figlet "Updated" >> "$LOG_FILE"
+        echo "Luveedu Firewall updated successfully!" >> "$LOG_FILE"
     else
-        echo "Installing luvd-firewall script..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-firewall"; exit 1; }
-        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
+        echo "Installing luvd-firewall script..." >> "$LOG_FILE"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-firewall" >> "$LOG_FILE"; mark_failed "Installing Luveedu Firewall"; }
+        sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
-        echo "luvd-firewall installed at $target"
+        echo "luvd-firewall installed at $target" >> "$LOG_FILE"
     fi
+    mark_done "Installing Luveedu Firewall"
 }
 
 # Function to download and install/update luvd-shield
 install_luvd_shield() {
+    display_step "Installing Luveedu Shield"
     local url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-shield.sh"
     local target="/usr/local/bin/luvd-shield"
     
     if [ -f "$target" ]; then
-        echo "Existing luvd-shield found, updating with latest version..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-shield"; exit 1; }
-        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
+        echo "Existing luvd-shield found, updating..." >> "$LOG_FILE"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-shield" >> "$LOG_FILE"; mark_failed "Installing Luveedu Shield"; }
+        sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
-        echo "luvd-shield updated at $target"
-        echo "Running luvd-shield --reset..."
-        sleep 5
-        "$target" --reset
-        figlet "Updated"
-        echo "Luveedu Shield updated successfully!"
-        # Don't exit here to allow full install/update process
+        echo "luvd-shield updated at $target" >> "$LOG_FILE"
+        "$target" --reset || mark_failed "Installing Luveedu Shield"
+        figlet "Updated" >> "$LOG_FILE"
+        echo "Luveedu Shield updated successfully!" >> "$LOG_FILE"
     else
-        echo "Installing luvd-shield script..."
-        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-shield"; exit 1; }
-        sudo sed -i 's/\r$//' "$target"  # Convert CRLF to LF
+        echo "Installing luvd-shield script..." >> "$LOG_FILE"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-shield" >> "$LOG_FILE"; mark_failed "Installing Luveedu Shield"; }
+        sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
-        echo "luvd-shield installed at $target"
+        echo "luvd-shield installed at $target" >> "$LOG_FILE"
     fi
+    mark_done "Installing Luveedu Shield"
 }
 
-# Function to set iptables rules for luvd-shield
+# Function to set iptables rules (simplified)
 set_iptables_rules() {
-    echo "Fixing iptables rules for Luveedu Shield..."
-    SERVER_IP=$(curl -s --max-time 2 https://ipv4.icanhazip.com/ 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
-    if [ -z "$SERVER_IP" ]; then
-        echo "Failed to determine server IP for iptables rules"
-        exit 1
-    fi
-    iptables -A INPUT -i lo -j ACCEPT
-    if ! iptables -L LOG_EXTERNAL -n 2>/dev/null; then
-        iptables -N LOG_EXTERNAL
-    else
-        iptables -F LOG_EXTERNAL
-    fi
-
-    if ! iptables -C INPUT -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
-        iptables -A INPUT -s 127.0.0.1 -j ACCEPT
-    fi
-    if ! iptables -C INPUT -s "$SERVER_IP" -j ACCEPT 2>/dev/null; then
-        iptables -A INPUT -s "$SERVER_IP" -j ACCEPT
-    fi
-    if ! iptables -C INPUT -m state --state NEW -j LOG_EXTERNAL 2>/dev/null; then
-        iptables -A INPUT -m state --state NEW -j LOG_EXTERNAL
-    fi
-    if ! iptables -C LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: " 2>/dev/null; then
-        iptables -A LOG_EXTERNAL -j LOG --log-prefix "NEW_CONNECTION: "
-    fi
-    
-    echo "iptables rules verified and set for luvd-shield (Server IP: $SERVER_IP)"
+    display_step "Setting iptables Rules"
+    echo "Setting simplified iptables rules..." >> "$LOG_FILE"
+    iptables -F  # Clear existing rules
+    iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " || { echo "Failed to set iptables rules" >> "$LOG_FILE"; mark_failed "Setting iptables Rules"; }
+    echo "iptables rules set successfully" >> "$LOG_FILE"
+    mark_done "Setting iptables Rules"
 }
 
 # Function to create and enable luvd-firewall service
 create_firewall_service() {
+    display_step "Configuring Luveedu Firewall Service"
     local service_file="/etc/systemd/system/luvd-firewall.service"
-    
-    if [ -f "$service_file" ]; then
-        echo "Existing luvd-firewall.service found, updating..."
-    else
-        echo "Creating luvd-firewall.service..."
-    fi
     
     cat <<EOF > "$service_file"
 [Unit]
@@ -165,22 +196,16 @@ WantedBy=multi-user.target
 EOF
     
     systemctl daemon-reload
-    systemctl enable luvd-firewall.service
-    sleep 5
-    systemctl start luvd-firewall.service
-    sleep 7
-    echo "luvd-firewall.service created/updated and enabled"
+    systemctl enable luvd-firewall.service || mark_failed "Configuring Luveedu Firewall Service"
+    systemctl start luvd-firewall.service || mark_failed "Configuring Luveedu Firewall Service"
+    echo "luvd-firewall.service created/updated and enabled" >> "$LOG_FILE"
+    mark_done "Configuring Luveedu Firewall Service"
 }
 
 # Function to create and enable luvd-shield service
 create_shield_service() {
+    display_step "Configuring Luveedu Shield Service"
     local service_file="/etc/systemd/system/luvd-shield.service"
-    
-    if [ -f "$service_file" ]; then
-        echo "Existing luvd-shield.service found, updating..."
-    else
-        echo "Creating luvd-shield.service..."
-    fi
     
     cat <<EOF > "$service_file"
 [Unit]
@@ -201,89 +226,111 @@ WantedBy=multi-user.target
 EOF
     
     systemctl daemon-reload
-    systemctl enable luvd-shield.service
-    sleep 6
-    systemctl start luvd-shield.service
-    echo "luvd-shield.service created/updated and enabled"
+    systemctl enable luvd-shield.service || mark_failed "Configuring Luveedu Shield Service"
+    systemctl start luvd-shield.service || mark_failed "Configuring Luveedu Shield Service"
+    echo "luvd-shield.service created/updated and enabled" >> "$LOG_FILE"
+    mark_done "Configuring Luveedu Shield Service"
 }
 
-# Function to check system requirements and start services (only runs for new install)
-check_and_start() {
-    echo "Checking system requirements..."
-    
-    echo "1. OS: $PKG_MANAGER-based system - OK"
-    echo "2. OpenLiteSpeed: Installed - OK"
-    
-    # Check luvd-firewall service
-    if systemctl is-enabled luvd-firewall.service >/dev/null 2>&1; then
-        echo "3. Service: luvd-firewall enabled - OK"
-    else
-        echo "3. Service: luvd-firewall not enabled - FAILED"
-        exit 1
+# Function to install antivirus dependencies
+install_antivirus_dependencies() {
+    display_step "Installing Antivirus Dependencies"
+    echo "Installing clamav, clamav-daemon, rkhunter..." >> "$LOG_FILE"
+    if [ "$PKG_MANAGER" = "apt" ]; then
+        apt install -y clamav clamav-daemon rkhunter || mark_failed "Installing Antivirus Dependencies"
+        systemctl stop clamav-freshclam
+        freshclam || mark_failed "Installing Antivirus Dependencies"
+        systemctl start clamav-freshclam
+        systemctl enable clamav-freshclam
+    elif [ "$PKG_MANAGER" = "dnf" ]; then
+        dnf install -y clamav clamd rkhunter || mark_failed "Installing Antivirus Dependencies"
+        systemctl stop clamav-freshclam
+        freshclam || mark_failed "Installing Antivirus Dependencies"
+        systemctl start clamav-freshclam
+        systemctl enable clamav-freshclam
     fi
+    mark_done "Installing Antivirus Dependencies"
+}
+
+# Function to download and install/update luvd-antivirus
+install_luvd_antivirus() {
+    display_step "Installing Luveedu Antivirus"
+    local url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-antivirus.sh"
+    local target="/usr/local/bin/luvd-antivirus"
     
-    if systemctl is-active luvd-firewall.service >/dev/null 2>&1; then
-        echo "4. Service: luvd-firewall active - OK"
+    if [ -f "$target" ]; then
+        echo "Existing luvd-antivirus found, updating..." >> "$LOG_FILE"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-antivirus" >> "$LOG_FILE"; mark_failed "Installing Luveedu Antivirus"; }
+        sudo sed -i 's/\r$//' "$target"
+        chmod +x "$target"
+        echo "luvd-antivirus updated at $target" >> "$LOG_FILE"
+        "$target" --reset || mark_failed "Installing Luveedu Antivirus"
+        figlet "Updated" >> "$LOG_FILE"
+        echo "Luveedu Antivirus updated successfully!" >> "$LOG_FILE"
     else
-        echo "4. Service: luvd-firewall not active - FAILED"
-        exit 1
+        echo "Installing luvd-antivirus script..." >> "$LOG_FILE"
+        wget -O "$target" "$url" 2>/dev/null || { echo "Failed to download luvd-antivirus" >> "$LOG_FILE"; mark_failed "Installing Luveedu Antivirus"; }
+        sudo sed -i 's/\r$//' "$target"
+        chmod +x "$target"
+        echo "luvd-antivirus installed at $target" >> "$LOG_FILE"
     fi
+    mark_done "Installing Luveedu Antivirus"
+}
+
+# Function to create and enable luvd-antivirus service
+create_antivirus_service() {
+    display_step "Configuring Luveedu Antivirus Service"
+    local service_file="/etc/systemd/system/luvd-antivirus.service"
     
-    if pgrep -f "luvd-firewall" >/dev/null; then
-        echo "5. Process: luvd-firewall running - OK"
-    else
-        echo "5. Process: luvd-firewall not running - FAILED"
-        exit 1
+    cat <<EOF > "$service_file"
+[Unit]
+Description=Luveedu Antivirus Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/luvd-antivirus --start
+ExecStop=/usr/local/bin/luvd-antivirus --stop
+Restart=on-failure
+Type=forking 
+PIDFile=/var/run/luvd-antivirus.pid
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable luvd-antivirus.service || mark_failed "Configuring Luveedu Antivirus Service"
+    systemctl start luvd-antivirus.service || mark_failed "Configuring Luveedu Antivirus Service"
+    echo "luvd-antivirus.service created/updated and enabled" >> "$LOG_FILE"
+    mark_done "Configuring Luveedu Antivirus Service"
+}
+
+# Function to finalize installation
+finalize_installation() {
+    display_step "Finalizing the Installer"
+    # Basic checks to ensure services are running
+    if ! systemctl is-active luvd-firewall.service >/dev/null 2>&1 || ! systemctl is-active luvd-shield.service >/dev/null 2>&1 || ! systemctl is-active luvd-antivirus.service >/dev/null 2>&1; then
+        echo "One or more services failed to start" >> "$LOG_FILE"
+        mark_failed "Finalizing the Installer"
     fi
-    
-    # Check luvd-shield service
-    if systemctl is-enabled luvd-shield.service >/dev/null 2>&1; then
-        echo "6. Service: luvd-shield enabled - OK"
-    else
-        echo "6. Service: luvd-shield not enabled - FAILED"
-        exit 1
-    fi
-    
-    if systemctl is-active luvd-shield.service >/dev/null 2>&1; then
-        echo "7. Service: luvd-shield active - OK"
-    else
-        echo "7. Service: luvd-shield not active - FAILED"
-        exit 1
-    fi
-    
-    if pgrep -f "luvd-shield" >/dev/null; then
-        echo "8. Process: luvd-shield running - OK"
-    else
-        echo "8. Process: luvd-shield not running - FAILED"
-        exit 1
-    fi
-    
-    echo "9. Running luvd-firewall --fix-logs..."
-    /usr/local/bin/luvd-firewall --fix-logs
-    echo "Completed luvd-firewall --fix-logs"
-    
-    echo "10. Running luvd-firewall --reset..."
-    /usr/local/bin/luvd-firewall --reset
-    
-    echo "11. Running luvd-shield --reset..."
-    /usr/local/bin/luvd-shield --reset
-    
-    figlet "Done"
-    echo "Successfully Installed Luveedu Firewall and Shield!"
-    echo "They are protecting your server from DoS/DDoS Attacks and Bad Bots!"
-    echo "Check Firewall Logs: luvd-firewall --check-logs"
-    echo "Check Blocked IPs: luvd-shield --blocked-list"
+    mark_done "Finalizing the Installer"
 }
 
 # Main execution
+display_header
 check_os
 update_system
 install_dependencies
+install_antivirus_dependencies
 check_openlitespeed
 install_luvd_firewall
 install_luvd_shield
+install_luvd_antivirus
 set_iptables_rules
-# These only run if it's a new install (install functions don't exit unless updating)
 create_firewall_service
 create_shield_service
-check_and_start
+create_antivirus_service
+finalize_installation
+display_completion
