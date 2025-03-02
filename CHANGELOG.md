@@ -2,6 +2,13 @@
 
 Our thinking is totally different, we always think beyond boudaries and updates. We will not maintain any version, we will simply put and fix issues based on the causes.
 
+## Last Issues Resolved - 02/03/2025
+
+```
+- Improved the Processing
+- Introduced DDOS Protection & Shield
+```
+
 ## Last Issues Resolved - 01/03/2025
 
 ```

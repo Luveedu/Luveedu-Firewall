@@ -1,7 +1,9 @@
 # Luveedu Firewall - Open Source & Free
-Luveedu Firewall is a lightweight and efficient tool designed to protect your OpenLiteSpeed web server from Denial of Service (DoS) attacks. It monitors server logs, detects suspicious activity, and blocks malicious IPs using *iptables*. 
+The Luveedu Firewall is a robust DoS and DDoS prevention tool designed for OpenLiteSpeed servers. This Bash script monitors the access log in real-time, enforcing strict rate limits—100 requests per 30 seconds and 15 requests per 3 seconds—to block malicious IPs using iptables. It supports whitelisting and blacklisting via an API, handles X-Forwarded-For headers for CDN compatibility, and logs all actions for transparency.
 
 ✅ Realtime Blocking
+
+✅ DDoS Blocking - Rate Limited
 
 ✅ Faster Blocking
 
@@ -17,19 +19,33 @@ Luveedu Firewall is a lightweight and efficient tool designed to protect your Op
 
 ## 2. Benefits of this Tool
 
-Luveedu Firewall offers several advantages for protecting your OpenLiteSpeed server:
+Luveedu Firewall offers a powerful suite of features to protect your OpenLiteSpeed server from DoS and DDoS attacks. Below are its key benefits:
 
--  **Real-time Monitoring**: Continuously monitors access logs to detect unusual traffic patterns.
+- **Real-time Monitoring**  
+  Continuously scans the OpenLiteSpeed access log (`/usr/local/lsws/logs/access.log`) to detect unusual traffic patterns and potential threats instantly. This proactive approach ensures rapid identification of attacks, minimizing downtime and maintaining server availability. Detailed logs are written to `/var/log/luvd-firewall.log`, enabling real-time or retrospective analysis by administrators.
 
--  **Rate Limiting**: Blocks IPs that exceed a predefined number of requests within a specified time window.
+- **Rate Limiting**  
+  Enforces dual-layer rate limits—100 requests per 30 seconds and 15 requests per 3 seconds—to block IPs exceeding these thresholds. This granular control mitigates both sustained and burst attack attempts, intelligently adjusting to traffic spikes to protect legitimate users. Blocked IPs are added to `iptables` with a 24-hour expiration, balancing security and flexibility.
 
--  **Whitelist/Blacklist Support**: Integrates with an Luveedu Cloud API to whitelist trusted IPs and blacklist malicious ones. It will never Block Google Bots, Bing Bots, Yahoo Bots, Any Known Search Bots, All Popular CDN IPs and Scanners. It will Block IPs rated Spam by Spamhaus and Comodo. ( Request API: https://waf.luveedu.cloud/checkip.php?ip=1.1.1.1 ) - Maintained by [Luveedu Cloud](https://cloud.luveedu.com) & Free to Use.
+- **Whitelist/Blacklist Support**  
+  Integrates seamlessly with the Luveedu Cloud API (`https://waf.luveedu.cloud/checkip.php?ip=`) for dynamic IP management. Whitelists trusted IPs, ensuring uninterrupted access for Google Bots, Bing Bots, Yahoo Bots, known search crawlers, popular CDN IPs (e.g., Cloudflare, Akamai), and legitimate scanners. Blacklists IPs flagged as spam by trusted sources like Spamhaus and Comodo. Maintained by [Luveedu Cloud](https://cloud.luveedu.com), this free API provides up-to-date threat intelligence at no cost.
 
--  **CIDR Blocking**: Automatically blocks entire IP ranges if a specific IP exceeds limits.
+- **CIDR Blocking**  
+  Automatically blocks entire IP ranges (e.g., /24 subnets) when a single IP exceeds rate limits and ends in `.0`, effectively targeting botnets and coordinated attacks. This reduces false positives by focusing on broader malicious patterns while preserving access for unrelated IPs. Use the `--release-ip` command to manually unblock specific IPs or ranges for precise control.
 
--  **Log Rotation**: Ensures logs do not grow indefinitely, maintaining system performance.
+- **Log Rotation**  
+  Implements automated log rotation every 5 minutes via the `rotate_logs` function, clearing logs like `/var/log/luvd-firewall.log` and `/usr/local/lsws/logs/access.log` to prevent disk space exhaustion. This maintains system performance and keeps logs manageable, with backups preserving critical data for long-term analysis.
 
--  **Lightweight**: Designed to run efficiently without consuming excessive server resources.
+- **Lightweight**  
+  Engineered as a Bash script, it runs efficiently with minimal resource overhead, ideal for resource-constrained environments. Leveraging tools like `iptables` and `curl`, it avoids heavy dependencies. With a 1-second check interval (`CHECK_INTERVAL=1`), it balances responsiveness with low CPU/memory usage, ensuring OpenLiteSpeed performance remains uncompromised.
+
+- **Additional Benefits**  
+  - **CDN Compatibility**: Respects `X-Forwarded-For` headers to identify real client IPs behind CDNs or proxies, ensuring accurate rate limiting without blocking legitimate traffic.  
+  - **Flexible Management**: Offers a rich CLI with commands like `--start`, `--stop`, `--check-logs`, `--blocked-list`, `--release-all`, and `--update`. The `--check-logs` feature provides a real-time dashboard of IP activity, including `Requests/30s` and `Requests/3s` metrics.  
+  - **Self-Updating**: The `--update` command fetches the latest version from GitHub, keeping the firewall current with emerging threats, followed by an automatic reset for seamless updates.  
+  - **Customizable Configuration**: Allows tweaking of parameters like `BLOCK_DURATION`, `REQUEST_LIMIT_PER_WINDOW`, and `WINDOW_DURATION` directly in the script, tailoring protection to specific server needs without external tools.
+
+These features make Luveedu Firewall a comprehensive, efficient, and user-friendly solution for safeguarding OpenLiteSpeed servers, ensuring robust security and operational flexibility.
 
   
 
@@ -38,9 +54,9 @@ Luveedu Firewall offers several advantages for protecting your OpenLiteSpeed ser
 
 ## 3. How it Works
 
-Luveedu Firewall operates by analyzing the OpenLiteSpeed access log (`access.log`) in real-time.
+Luveedu Firewall operated by analyzing the OpenLiteSpeed access log (`access.log`) & (`syslog`) in real-time.
 
-It Continuously monitors the access.log file and syslog files to detect the IP and hence, it detects the Number of requests sent by the IP in a 30 second threshold if it cross the threshold, we will verify the IP if it is a Good IP like Googlebot, Bingbot or Cloudflare then we will not block it else, we will do a quick block for a Period of Time using iptables and ipset.
+ Features include automatic log rotation, expired block removal after 24 hours, and commands to start, stop, reset, or check stats. With its configurable settings and real-time monitoring, Luveedu Firewall ensures server security against denial-of-service attacks. 
 
 
 &nbsp;
