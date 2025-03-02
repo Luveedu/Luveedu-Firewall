@@ -220,13 +220,14 @@ Below is a detailed explanation of the available CLI options for managing and mo
 
 We are improving it day by day, we will implement so many things. Some of our thoughts.
 
-
+```
 1. GUI Layout
 2. Web Dashboard
-5. Proper Blocking WAF using ModSecurity
-6. SQL and XSS Prevention
-7. Bruteforce Prevention
-
+3. Proper Blocking WAF using ModSecurity
+4. SQL and XSS Prevention
+5. Bruteforce Prevention
+6. Support for all Panels and Standalone servers
+```
   
   
 
@@ -239,8 +240,37 @@ We are improving it day by day, we will implement so many things. Some of our th
 Currently, we are accepting your feedbacks and error requests by
 
 ```
-1. support[@]luveedu.com
-2. https://www.luveedu.com/contact/
+1. github.support[@]luveedu.com
+2. https://www.luveedu.com/contact/?utm-source=Github.com
 3. Create Issue in Github
 4. Create Forums in Cyberpanel or LiteSpeed
+```
+
+&nbsp;
+
+## 6. Credits & Funding
+
+  
+
+It is managed by Luveedu Cloud Team & Build by [Ariyan Debnath](https://www.linkedin.com/in/ariyan-debnath)
+
+**Credits**
+
+```
+© Webxenith Technologies LLP
+Managed by Luveedu Cloud Team | 100% FREE FOR ALL
+
+-- Thanks to ClamAV
+-- Thanks to Comodo
+-- Thanks to Github always
+```
+
+**Sponsership & Funding**
+
+```
+- Currently No Sponsorer
+
+You can fund this project to make it a full fledge enterprise level Open source Malware Scanning & WAF.
+
+We need Your time and experience.
 ```
