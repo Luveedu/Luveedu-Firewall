@@ -148,7 +148,7 @@ Below is a detailed explanation of the available CLI options for managing and mo
 
 &nbsp;
 
-## Luveedu AV ( Antivirus ) - Malware Scanning & Removal by ClamAV & Comodo ( Addon )
+## Luveedu Antivirus - Malware Scanning & Removal - ClamAV & Comodo ( Addon )
 
 Luveedu AV ( Antivirus ) is a powerful and super strong malware scanning and removal tool by Luveedu Firewall. You can easily scan, detect, disinfect and remove malicious files. Its that simple and easy. You can always try system scanning, mail scanning, Database Scanning, 100+ File types support. Custom Comodo ClamAV Signatures for refinement. Best Positive Rate & Great Way to Resolve all malware issues.
 
