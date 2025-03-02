@@ -17,6 +17,20 @@ The Luveedu Firewall is a robust DoS and DDoS prevention tool designed for OpenL
 
 &nbsp;
 
+### Guides & Installation
+[Installation](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#4-installation)
+
+Guides for: [Luveedu Firewall](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#luveedu-firewall---usage-options)
+//
+[Luveedu Shield](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#luveedu-shield---realtime-block-malicious-bots--reduce-load--addon-)
+//
+[Luveedu Antivirus](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#luveedu-antivirus---malware-scanning--removal--addon-)
+
+[Support & Feedback](https://github.com/Luveedu/Luveedu-Firewall/tree/main?tab=readme-ov-file#6-support--feedback)
+
+
+&nbsp;
+
 ## 2. Benefits of this Tool
 
 Luveedu Firewall offers a powerful suite of features to protect your OpenLiteSpeed server from DoS and DDoS attacks. Below are its key benefits:
@@ -82,7 +96,7 @@ wget -qO- https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/
 
 &nbsp;
 
-### Luveedu Firewall - Usage Options
+## Luveedu Firewall - DDoS / DoS Blocking ( Super Powerful )
 
   
 
