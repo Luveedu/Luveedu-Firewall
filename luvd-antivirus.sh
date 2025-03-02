@@ -355,8 +355,49 @@ scan_domains() {
     fi
 }
 
+# New function to start the service (runs periodic scans)
+start_service() {
+    check_clamav
+    update_signatures
+    echo "[$(date)] Luveedu Antivirus service started" | sudo tee -a "$SCAN_LOG" >/dev/null
+    (
+        while true; do
+            scan_clamav "$SCAN_DIR"
+            sleep 86400  # Run scan every day
+        done
+    ) &
+    service_pid=$!
+    echo "$service_pid" >"/var/run/luvd-antivirus.pid"
+    echo "Luveedu Antivirus service started (PID: $service_pid). Scans will run hourly."
+}
+
+# New function to stop the service
+stop_service() {
+    if [ -f "/var/run/luvd-antivirus.pid" ]; then
+        service_pid=$(cat "/var/run/luvd-antivirus.pid")
+        if ps -p "$service_pid" >/dev/null; then
+            sudo kill -9 "$service_pid"
+            sudo killall -9 luvd-antivirus
+            rm -f "/var/run/luvd-antivirus.pid"
+            echo "[$(date)] Luveedu Antivirus service (PID: $service_pid) stopped" | sudo tee -a "$SCAN_LOG" >/dev/null
+            echo "Luveedu Antivirus service stopped successfully."
+        else
+            echo "No running service found."
+            rm -f "/var/run/luvd-antivirus.pid"
+        fi
+    else
+        echo "No active service PID found."
+    fi
+}
+
 # Parse command-line options
 case "$1" in
+--start)
+    start_service
+    ;;
+--stop)
+    stop_service
+    ;;
 --scan)
     shift
     case "$1" in
@@ -431,6 +472,8 @@ case "$1" in
 *)
     echo "Usage: luvd-antivirus [OPTION] [ARGUMENT]"
     echo "Options:"
+    echo "  --start             Start the antivirus service (runs periodic scans)"
+    echo "  --stop              Stop the antivirus service"
     echo "  --scan              Scan entire home directory"
     echo "  --scan --folder <path>  Scan a specific folder"
     echo "  --scan --domains    Select and scan a domain folder"

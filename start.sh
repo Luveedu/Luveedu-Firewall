@@ -10,13 +10,13 @@ fi
 
 # Log file setup
 LOG_FILE="luvd-firewall-installation-$(date '+%Y-%m-%d_%H-%M-%S').log"
-# Redirect all output to log file, but we'll control terminal output separately
+# Redirect all output to log file, terminal output controlled via >&3
 exec 3>&1 >"$LOG_FILE" 2>&1
 
 # Function to display header
 display_header() {
     echo "----------------------------------------------------------" >&3
-    echo "             Luveedu Firewall System - v1.0.0             " >&3
+    echo "             Luveedu Firewall System - v1.0.1             " >&3
     echo "----------------------------------------------------------" >&3
     echo >&3
 }
@@ -315,7 +315,10 @@ finalize_installation() {
     mark_done "Finalizing the Installer"
 }
 
-# Main execution
+# Main execution with trap to catch failures
+set -e  # Exit on any error
+trap 'if [ $? -ne 0 ]; then mark_failed "Unexpected failure"; fi' EXIT
+
 display_header
 check_os
 update_system
@@ -331,3 +334,7 @@ create_shield_service
 create_antivirus_service
 finalize_installation
 display_completion
+
+# Reset trap and exit cleanly on success
+trap - EXIT
+exit 0
