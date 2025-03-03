@@ -9,12 +9,28 @@ LOG_FILE="$LOG_DIR/clamav_scan_log_$(date +%Y%m%d_%H%M%S).txt"
 QUARANTINE_DIR="/tmp/quarantine"
 UPDATE_URL="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-antivirus.sh"
 RKHUNTER_LOG="/var/log/rkhunter.log"
-EXCLUDE_FOLDERS=("/opt" "/proc" "/cyberpanel" "/backup")
+EXCLUDE_FOLDERS=("/opt" "/proc" "/cyberpanel" "/backup" "./trash" "/cache")
+REPORTS_LOG="/var/log/luvd-antivirus-reports.log"
 
-# Ensure log directories exist
+# Ensure log directories exist (add reports log)
 [ ! -d "/var/log" ] && sudo mkdir -p "/var/log"
 [ ! -f "$SCAN_LOG" ] && sudo touch "$SCAN_LOG" && sudo chmod 644 "$SCAN_LOG"
+[ ! -f "$REPORTS_LOG" ] && sudo touch "$REPORTS_LOG" && sudo chmod 644 "$REPORTS_LOG"
 [ ! -d "$LOG_DIR" ] && sudo mkdir -p "$LOG_DIR" && sudo chmod 755 "$LOG_DIR"
+
+# New function to save scan summary
+save_scan_summary() {
+    local log_file="$1"
+    if [ -f "$log_file" ]; then
+        local scanned_files=$(grep "Scanned files:" "$log_file" | awk '{print $3}')
+        local infected_files=$(grep "Infected files:" "$log_file" | awk '{print $3}')
+        local time_sec=$(grep "Time:" "$log_file" | awk '{print $2}' | cut -d'.' -f1)
+        local time_min=$((time_sec / 60))
+        local date_time=$(date "+%d/%m/%Y %H:%M:%S")
+        
+        echo "[$date_time] - Scan Completed - $scanned_files - $infected_files - $time_min" | sudo tee -a "$REPORTS_LOG" >/dev/null
+    fi
+}
 
 # Setup quarantine directory in /tmp with restrictions
 setup_quarantine() {
@@ -149,7 +165,7 @@ scan_rkhunter() {
     ) &
     scan_pid=$!
     echo "$scan_pid" >"/tmp/luvd-antivirus.pid"
-    echo "Rootkit scan started in background (PID: $scan_pid). Check $RKHUNTER_LOG for details."
+    echo "Rootkit scan started in background. Try luvd-antivirus --check-logs --rkhunter for details."
 }
 
 # Function to update script
@@ -172,7 +188,8 @@ update_script() {
     fi
 }
 
-# Function to check logs with real-time progress (ClamAV)
+
+# Modified check_logs function
 check_logs() {
     if [ -f "$SCAN_LOG" ] && [ -f "/tmp/luvd-antivirus.pid" ]; then
         scan_pid=$(cat "/tmp/luvd-antivirus.pid")
@@ -200,6 +217,12 @@ check_logs() {
                 fi
                 sleep 10
             done
+            # After scan completes
+            save_scan_summary "$LOG_FILE"
+            sleep 5
+            sudo rm -rf "$LOG_DIR"/* "$SCAN_LOG"
+            sudo touch "$SCAN_LOG" && sudo chmod 644 "$SCAN_LOG"
+            echo "Scan completed and logs cleared after 5 seconds."
         else
             echo "Luveedu Antivirus - Scanning Logs (Updates every 10 seconds)"
             echo "------------------------------------------------------------"
@@ -212,6 +235,7 @@ check_logs() {
         echo "No Manual Scan Running! Try luvd-antivirus --scan to scan the entire home directory"
     fi
 }
+
 
 # Function to check rkhunter logs
 check_rkhunter_logs() {
@@ -226,18 +250,19 @@ check_rkhunter_logs() {
     fi
 }
 
-# Function to check stats (last 10 scans)
+# Modified check_stats function
 check_stats() {
-    if [ -f "$SCAN_LOG" ] && grep -q "Scan completed" "$SCAN_LOG"; then
+    if [ -f "$REPORTS_LOG" ] && [ -s "$REPORTS_LOG" ]; then
         echo "Luveedu Antivirus - Scan History (Last 10 Results)"
         echo "------------------------------------------------------------"
-        printf "| %-19s | %-15s | %-15s |\n" "Date & Time" "Scanned Files" "Infected Files"
+        printf "| %-19s | %-15s | %-15s | %-13s |\n" "Date & Time" "Scanned Files" "Infected Files" "Time (min)"
         echo "------------------------------------------------------------"
-        grep "Scan completed" "$SCAN_LOG" | tail -n 10 | while IFS= read -r line; do
+        tail -n 10 "$REPORTS_LOG" | while IFS= read -r line; do
             date_time=$(echo "$line" | cut -d']' -f1 | cut -d'[' -f2)
-            scanned=$(echo "$line" | awk '{print $5}' | tr -d ',')
-            infected=$(echo "$line" | awk '{print $7}' | tr -d ',')
-            printf "| %-19s | %-15s | %-15s |\n" "$date_time" "$scanned" "$infected"
+            scanned=$(echo "$line" | awk '{print $5}')
+            infected=$(echo "$line" | awk '{print $7}')
+            time_min=$(echo "$line" | awk '{print $9}')
+            printf "| %-19s | %-15s | %-15s | %-13s |\n" "$date_time" "$scanned" "$infected" "$time_min"
         done
         echo "------------------------------------------------------------"
     else
@@ -319,11 +344,12 @@ restore_file() {
     fi
 }
 
-# Function to clear logs
+# Modified clear_logs function
 clear_logs() {
-    if [ -d "$LOG_DIR" ] || [ -f "$SCAN_LOG" ]; then
-        sudo rm -rf "$LOG_DIR"/* "$SCAN_LOG"
+    if [ -d "$LOG_DIR" ] || [ -f "$SCAN_LOG" ] || [ -f "$REPORTS_LOG" ] || [ -f "$RKHUNTER_LOG" ]; then
+        sudo rm -rf "$LOG_DIR"/* "$SCAN_LOG" "$REPORTS_LOG" "$RKHUNTER_LOG"
         sudo touch "$SCAN_LOG" && sudo chmod 644 "$SCAN_LOG"
+        sudo touch "$REPORTS_LOG" && sudo chmod 644 "$REPORTS_LOG"
         echo "[$(date)] All logs cleared" | sudo tee -a "$SCAN_LOG" >/dev/null
         echo "All logs cleared successfully."
     else
@@ -360,15 +386,7 @@ start_service() {
     check_clamav
     update_signatures
     echo "[$(date)] Luveedu Antivirus service started" | sudo tee -a "$SCAN_LOG" >/dev/null
-    (
-        while true; do
-            scan_clamav "$SCAN_DIR"
-            sleep 86400  # Run scan every day
-        done
-    ) &
-    service_pid=$!
-    echo "$service_pid" >"/var/run/luvd-antivirus.pid"
-    echo "Luveedu Antivirus service started (PID: $service_pid). Scans will run hourly."
+    echo "Luveedu Antivirus service started!"
 }
 
 # New function to stop the service
