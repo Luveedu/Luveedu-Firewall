@@ -118,6 +118,8 @@ Below is a detailed explanation of the available CLI options for managing and mo
 
 ```luvd-firewall --fix-logs``` - Fix the vHosts to log in access.log file
 
+```luvd-firewall --fix-logs --domains``` - Fix the vHosts to log in access.log file for Specific Domain
+
 ```luvd-firewall --reset``` - If the Firewall is not Working Simply Reset the Configuration
 
 ```luvd-firewall --update``` - Update the Script to the Latest Version from Github
