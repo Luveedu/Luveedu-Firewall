@@ -43,6 +43,7 @@ mark_failed() {
 display_completion() {
     echo >&3
     echo "//////////////// COMPLETED ////////////////" >&3
+    echo "Now Enjoy the Security and Power of Luveedu Firewall. Follow the Github Guid, Enjoy : D" >&3
     echo "For more information visit: https://github.com/Luveedu/Luveedu-Firewall" >&3
     echo "Installation Log saved in: $LOG_FILE" >&3
 }
@@ -51,6 +52,7 @@ display_completion() {
 display_failure() {
     echo >&3
     echo "//////////////// FAILED ////////////////" >&3
+    echo "It seems that the Installation or Update failed, Support - https://www.luveedu.com/contact" >&3
     echo "For more information visit: https://github.com/Luveedu/Luveedu-Firewall" >&3
     echo "Installation failed. Check the log for details: $LOG_FILE" >&3
 }
