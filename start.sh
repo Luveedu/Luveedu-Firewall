@@ -43,7 +43,7 @@ mark_failed() {
 display_completion() {
     echo >&3
     echo "//////////////// COMPLETED ////////////////" >&3
-    echo "Now Enjoy the Security and Power of Luveedu Firewall. Follow the Github Guid, Enjoy : D" >&3
+    echo "Now Enjoy the Security and Power of Luveedu Firewall. Follow the Github Guide, Enjoy : D" >&3
     echo "For more information visit: https://github.com/Luveedu/Luveedu-Firewall" >&3
     echo "Installation Log saved in: $LOG_FILE" >&3
 }
