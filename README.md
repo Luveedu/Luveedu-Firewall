@@ -1,3 +1,7 @@
+```
+UPCOMING UPDATES: New Luveedu WAF Addon Powered by ModSecurity
+```
+
 # Luveedu Firewall - Open Source & Free
 The Luveedu Firewall is a robust DoS and DDoS prevention tool designed for OpenLiteSpeed servers. This Bash script monitors the access log in real-time, enforcing strict rate limits—100 requests per 30 seconds and 15 requests per 3 seconds—to block malicious IPs using iptables. It supports whitelisting and blacklisting via an API, handles X-Forwarded-For headers for CDN compatibility, and logs all actions for transparency.
 

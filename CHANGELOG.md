@@ -2,6 +2,14 @@
 
 Our thinking is totally different, we always think beyond boudaries and updates. We will not maintain any version, we will simply put and fix issues based on the causes.
 
+## Last Issues Resolved - 04/03/2025
+
+```
+- Improved the Installer
+- Improved the Scanning Engine and Reduced System Errors
+- New ModSecurity Powered WAF Coming Soon
+```
+
 ## Last Issues Resolved - 02/03/2025
 
 ```
