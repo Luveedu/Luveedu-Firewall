@@ -240,7 +240,7 @@ We are improving it day by day, we will implement so many things. Some of our th
 Currently, we are accepting your feedbacks and error requests by
 
 ```
-1. github.support[@]luveedu.com
+1. support[@]luveedu.com
 2. https://www.luveedu.com/contact/?utm-source=Github.com
 3. Create Issue in Github
 4. Create Forums in Cyberpanel or LiteSpeed
