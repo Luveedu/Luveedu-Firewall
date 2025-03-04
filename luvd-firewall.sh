@@ -9,14 +9,14 @@ VH_CONF_PATTERN="/usr/local/lsws/conf/vhosts/*/vhost.conf"
 BLOCK_DURATION=$((60 * 60 * 24)) # 1 day in seconds
 
 # SET THESE NUMBERS FOR DOS ATTACK STOPPING
-REQUEST_LIMIT_PER_WINDOW=100     # Max requests per 30-second window
-WINDOW_DURATION=30               # Window duration in seconds
+REQUEST_LIMIT_PER_WINDOW=150 # Max requests per 30-second window
+WINDOW_DURATION=30           # Window duration in seconds
 
 # SET THESE NUMBERS FOR DDOS ATTACK STOPPING
-REQUEST_LIMIT_PER_SEC=15         # Max requests per short time window
-SEC_WINDOW_DURATION=3            # Short time window duration in seconds
+REQUEST_LIMIT_PER_SEC=35 # Max requests per short time window
+SEC_WINDOW_DURATION=3    # Short time window duration in seconds
 
-CHECK_INTERVAL=1                 # Check every 1 second
+CHECK_INTERVAL=1
 PID_FILE="/var/run/luvd-firewall.pid"
 BLOCKED_IPS_FILE="/var/tmp/luvd-blocked-ips.txt"
 DESIRED_LOG_FORMAT='%h %l %u %t "%r" %>s %b "%{X-Forwarded-For}i" "%{User-Agent}i"'
@@ -236,6 +236,9 @@ block_ip() {
 # Function to block blacklist IPs
 block_blacklist() {
     while read -r ip timestamp; do
+        if iptables -C INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            continue # Skip if already blocked
+        fi
         if ! in_list "$ip" "WHITELIST" && in_list "$ip" "BLACKLIST"; then
             block_ip "$ip" "blacklist" "0"
         fi
@@ -246,7 +249,6 @@ block_blacklist() {
 preserve_log_rule() {
     if iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
         LOG_RULE_EXISTS=true
-        echo "$(date '+%Y-%m-%d %H:%M:%S') Preserving LUVEEDU-SHIELD LOG rule" >>"$FIREWALL_LOG"
     else
         LOG_RULE_EXISTS=false
     fi
@@ -256,7 +258,6 @@ restore_log_rule() {
     if [ "$LOG_RULE_EXISTS" = true ]; then
         if ! iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
             iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Restored LUVEEDU-SHIELD LOG rule" >>"$FIREWALL_LOG"
         fi
     fi
 }
@@ -282,23 +283,28 @@ unblock_expired() {
 
 # Function to release all blocked IPs and clear logs
 release_all() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Releasing all blocked IPs and clearing logs..." >>"$FIREWALL_LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Releasing all REJECT blocked IPs and clearing logs..." >>"$FIREWALL_LOG"
     preserve_log_rule
-    while read -r entry timestamp; do
-        iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null # Delete specific rule
-        if [[ "$entry" =~ /24$ ]]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Released CIDR: $entry" >>"$FIREWALL_LOG"
+
+    # Remove all REJECT rules from INPUT chain using awk
+    iptables -S INPUT | awk '/-s/ && /REJECT/ {for(i=1;i<=NF;i++) if($i=="-s") print $(i+1)}' | while read -r source; do
+        if [ -n "$source" ] && iptables -D INPUT -s "$source" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Released REJECT rule for: $source" >>"$FIREWALL_LOG"
         else
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Released IP: $entry" >>"$FIREWALL_LOG"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Failed to release REJECT rule for: $source (may not exist or syntax mismatch)" >>"$FIREWALL_LOG"
         fi
-    done <"$BLOCKED_IPS_FILE"
+    done
+
+    # Clear blocked IPs file and logs
     >"$BLOCKED_IPS_FILE"
     >"$FIREWALL_LOG"
     >"$ACCESS_LOG"
     >"$LAST_LINE_FILE"
-    iptables-save >/etc/iptables/rules.v4 # Persist rules
+
+    # Save updated iptables state (preserving DROP rules)
+    iptables-save >/etc/iptables/rules.v4
     restore_log_rule
-    echo "$(date '+%Y-%m-%d %H:%M:%S') All IPs released from iptables and blocklist, logs cleared." >>"$FIREWALL_LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') All REJECT IPs released from iptables, blocklist and logs cleared. DROP rules preserved." >>"$FIREWALL_LOG"
 }
 
 # Function to release a specific IP or CIDR
@@ -362,14 +368,20 @@ reset() {
     echo "Restarted OpenLiteSpeed Webserver"
 
     preserve_log_rule
-    iptables -F INPUT 2>/dev/null
-    while read -r entry timestamp; do
-        iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
-    done <"$BLOCKED_IPS_FILE"
-    >"$BLOCKED_IPS_FILE"
+    # Remove all REJECT rules from INPUT chain using awk
+    iptables -S INPUT | awk '/-s/ && /REJECT/ {for(i=1;i<=NF;i++) if($i=="-s") print $(i+1)}' | while read -r source; do
+        if [ -n "$source" ] && iptables -D INPUT -s "$source" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Released REJECT rule for: $source" >>"$FIREWALL_LOG"
+        else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Failed to release REJECT rule for: $source (may not exist or syntax mismatch)" >>"$FIREWALL_LOG"
+        fi
+    done
+
+    # Save updated iptables state (preserving DROP rules)
+    iptables-save >/etc/iptables/rules.v4
     restore_log_rule
 
-    echo "$(date '+%Y-%m-%d %H:%M:%S') All IPs released and logs cleared." >>"$FIREWALL_LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') All REJECT IPs released and logs cleared. DROP rules preserved." >>"$FIREWALL_LOG"
 
     systemctl start luvd-firewall 2>/dev/null || echo "Service start failed, check systemd configuration."
     echo "Luveedu Firewall reset complete."
@@ -392,13 +404,14 @@ blocked_list() {
 
 # Function to clear all logs (only log files, not iptables or blocked IPs)
 clear_logs() {
-    echo "Clearing all Luveedu Firewall logs..."
     preserve_log_rule
-    >"$FIREWALL_LOG"  # Clear firewall log
-    >"$ACCESS_LOG"    # Clear access log
+    >"$FIREWALL_LOG"   # Clear firewall log
+    >"$ACCESS_LOG"     # Clear access log
     >"$LAST_LINE_FILE" # Clear last line file
     restore_log_rule
-    echo "All logs cleared."
+    echo "-------------------------------------------------------------------------------"
+    echo "############## All Firewall Logs Cleared  ##############"
+    echo "-------------------------------------------------------------------------------"
 }
 
 # Function to fix log formats with optional domain selection
@@ -433,7 +446,7 @@ fix_logs() {
 
         # Validate selection
         if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -ge "$index" ]; then
-            echo "Invalid selection. Please enter a number between 1 and $((index-1))"
+            echo "Invalid selection. Please enter a number between 1 and $((index - 1))"
             exit 1
         fi
 
@@ -515,7 +528,7 @@ check_logs() {
 
     tail -n 1000 -f "$FIREWALL_LOG" | while read -r line; do
         local now=$(date +%s)
-        local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s') # 30s cutoff
+        local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s')         # 30s cutoff
         local sec_cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s') # Configurable short window cutoff
 
         # Reset Requests/30s every 30 seconds
@@ -624,9 +637,10 @@ rotate_logs() {
         last_rotation=$(cat "$last_rotation_file")
     fi
 
-    if [ $((now - last_rotation)) -ge 300 ]; then
+    if [ $((now - last_rotation)) -ge 60 ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') Initiating log rotation..." >>"$FIREWALL_LOG"
         clear_logs
+        sleep 2
         echo "$now" >"$last_rotation_file"
         echo "$(date '+%Y-%m-%d %H:%M:%S') Log rotation completed: All logs cleared" >>"$FIREWALL_LOG"
     fi
@@ -662,7 +676,6 @@ monitor_requests() {
 
     while [ -f "$PID_FILE" ]; do
         if [ -f "$ACCESS_LOG" ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Checking access log: $ACCESS_LOG" >>"$FIREWALL_LOG"
             if [ ! -r "$ACCESS_LOG" ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') Error: Cannot read $ACCESS_LOG" >>"$FIREWALL_LOG"
                 touch "$ACCESS_LOG" || {
@@ -690,7 +703,6 @@ monitor_requests() {
 
                         if [ -n "$main_ip" ]; then
                             if grep -q "^$main_ip " "$BLOCKED_IPS_FILE" || is_ip_in_blocked_cidr "$main_ip"; then
-                                echo "$(date '+%Y-%m-%d %H:%M:%S') Main IP $main_ip already blocked or in blocked CIDR, skipping" >>"$FIREWALL_LOG"
                                 continue
                             fi
 
@@ -708,7 +720,7 @@ monitor_requests() {
                                     fi
 
                                     if grep -q "^$ip_to_block " "$BLOCKED_IPS_FILE" || is_ip_in_blocked_cidr "$ip_to_block"; then
-                                        echo "$(date '+%Y-%m-%d %H:%M:%S') IP $ip_to_block already blocked or in blocked CIDR, skipping" >>"$FIREWALL_LOG"
+                                        echo " " >>"$FIREWALL_LOG"
                                         continue
                                     fi
 
@@ -773,7 +785,6 @@ monitor_requests() {
         fi
 
         unblock_expired
-        block_blacklist
         sleep "$CHECK_INTERVAL"
     done
     echo "$(date '+%Y-%m-%d %H:%M:%S') Monitoring stopped due to stop command (PID: $$)" >>"$FIREWALL_LOG"
@@ -785,7 +796,7 @@ monitor_per_second_rate() {
     local ip="$1"
     local timestamp="$2"
     local ip_to_block="$3"
-    
+
     # Align to the start of the current 3-second window
     local window_start=$((timestamp - (timestamp % SEC_WINDOW_DURATION)))
     local sec_key="$ip,$window_start"
@@ -819,7 +830,6 @@ monitor_per_second_rate() {
     return 0
 }
 
-
 # Modified monitor_requests function with new per-3-second rate limiting
 monitor_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Luveedu Firewall started. Monitoring: $ACCESS_LOG (PID: $$)" >>"$FIREWALL_LOG"
@@ -852,7 +862,6 @@ monitor_requests() {
 
     while [ -f "$PID_FILE" ]; do
         if [ -f "$ACCESS_LOG" ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Checking access log: $ACCESS_LOG" >>"$FIREWALL_LOG"
             if [ ! -r "$ACCESS_LOG" ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') Error: Cannot read $ACCESS_LOG" >>"$FIREWALL_LOG"
                 touch "$ACCESS_LOG" || {
@@ -863,7 +872,7 @@ monitor_requests() {
             fi
 
             local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s')
-            local sec_cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s')  # Use configurable short window
+            local sec_cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s') # Use configurable short window
             local total_lines=$(wc -l <"$ACCESS_LOG")
             local lines_to_process=$((total_lines - last_lines_processed))
             local lines_processed=0
@@ -881,7 +890,6 @@ monitor_requests() {
 
                         if [ -n "$main_ip" ]; then
                             if grep -q "^$main_ip " "$BLOCKED_IPS_FILE" || is_ip_in_blocked_cidr "$main_ip"; then
-                                echo "$(date '+%Y-%m-%d %H:%M:%S') Main IP $main_ip already blocked or in blocked CIDR, skipping" >>"$FIREWALL_LOG"
                                 continue
                             fi
 
@@ -899,7 +907,7 @@ monitor_requests() {
                                     fi
 
                                     if grep -q "^$ip_to_block " "$BLOCKED_IPS_FILE" || is_ip_in_blocked_cidr "$ip_to_block"; then
-                                        echo "$(date '+%Y-%m-%d %H:%M:%S') IP $ip_to_block already blocked or in blocked CIDR, skipping" >>"$FIREWALL_LOG"
+                                        echo " " >>"$FIREWALL_LOG"
                                         continue
                                     fi
 
@@ -993,7 +1001,6 @@ monitor_requests() {
         fi
 
         unblock_expired
-        block_blacklist
         sleep "$CHECK_INTERVAL"
     done
     echo "$(date '+%Y-%m-%d %H:%M:%S') Monitoring stopped due to stop command (PID: $$)" >>"$FIREWALL_LOG"
@@ -1089,7 +1096,7 @@ update() {
 case "$1" in
 --start) start ;;
 --stop) stop ;;
---fix-logs) 
+--fix-logs)
     if [ "$2" = "--domains" ]; then
         fix_logs "--domains"
     else
