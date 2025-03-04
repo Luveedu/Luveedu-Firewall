@@ -218,7 +218,17 @@ Below is a detailed explanation of the available CLI options for managing and mo
 
 ```luvd-antivirus --clear-logs``` - It can clear all Unwanted Luveedu Antivirus Logs
 
+&nbsp;
 
+----------
+
+### Try DDoS and DoS Attacks
+
+Our Testing Domain using our Luveedu Firewall ( No Cloudflare, No CDN - Let's Try )
+
+```
+https://test.luveedu.com/
+``` 
 
 &nbsp;
 
@@ -234,7 +244,7 @@ We are improving it day by day, we will implement so many things. Some of our th
 5. Bruteforce Prevention
 6. Support for all Panels and Standalone servers
 ```
-  
+
   
 
 &nbsp;
