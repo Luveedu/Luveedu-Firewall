@@ -16,8 +16,9 @@ exec 3>&1 >"$LOG_FILE" 2>&1
 # Function to display header
 display_header() {
     echo "----------------------------------------------------------" >&3
-    echo "             Luveedu Firewall System - v1.0.1             " >&3
+    echo "             Luveedu Firewall System - v1.0.2             " >&3
     echo "----------------------------------------------------------" >&3
+    echo "Installation Log: $LOG_FILE          " >&3
     echo >&3
 }
 
@@ -262,7 +263,7 @@ install_luvd_antivirus() {
         sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
         echo "luvd-antivirus updated at $target"
-        "$target" --reset || mark_failed "Installing Luveedu Antivirus"
+        "$target" --clear-logs || mark_failed "Installing Luveedu Antivirus"
         figlet "Updated"
         echo "Luveedu Antivirus updated successfully!"
     else
