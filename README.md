@@ -1,5 +1,5 @@
 ```
-UPCOMING UPDATES: New Luveedu WAF Addon Powered by ModSecurity
+COMING SOON: New Luveedu WAF Addon Powered by ModSecurity.
 ```
 
 # Luveedu Firewall - Open Source & Free
