@@ -401,27 +401,82 @@ clear_logs() {
     echo "All logs cleared."
 }
 
-# Function to fix log formats
+# Function to fix log formats with optional domain selection
 fix_logs() {
-    echo "Updating all vhost configurations to use a single access log file: $ACCESS_LOG..."
-    local changed=0
-    for conf in $VH_CONF_PATTERN; do
+    if [ "$1" = "--domains" ]; then
+        echo "Scanning domains in /home..."
+        declare -A domain_map
+        local domain_list=()
+        local index=1
+
+        # Find directories in /home that look like domains (contain a dot)
+        for dir in /home/*; do
+            if [ -d "$dir" ]; then
+                local basename=$(basename "$dir")
+                if [[ "$basename" =~ \. ]]; then
+                    domain_list+=("$basename")
+                    domain_map[$index]="$basename"
+                    echo "$index. $basename"
+                    ((index++))
+                fi
+            fi
+        done
+
+        if [ ${#domain_list[@]} -eq 0 ]; then
+            echo "No domains found in /home"
+            exit 1
+        fi
+
+        # Prompt for selection
+        echo -n "> "
+        read selection
+
+        # Validate selection
+        if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -ge "$index" ]; then
+            echo "Invalid selection. Please enter a number between 1 and $((index-1))"
+            exit 1
+        fi
+
+        local selected_domain="${domain_map[$selection]}"
+        echo "Selected domain: $selected_domain"
+
+        # Find corresponding vhost config
+        local conf="/usr/local/lsws/conf/vhosts/$selected_domain/vhost.conf"
         if [ -f "$conf" ]; then
-            echo "Processing $conf"
+            echo "Processing $conf for domain $selected_domain"
             sudo cp "$conf" "$conf.bak.$(date +%F_%T)"
             if grep -q "accesslog" "$conf"; then
                 sudo sed -i '/accesslog .* {/,/}/d' "$conf"
             fi
             echo -e "accesslog $ACCESS_LOG {\n  useServer               1\n  logFormat               \"$DESIRED_LOG_FORMAT\"\n  logHeaders              7\n  keepDays                7\n  compressArchive         0\n}" | sudo tee -a "$conf" >/dev/null
-            changed=1
+            echo "Reloading OpenLiteSpeed to apply changes..."
+            sudo systemctl reload lsws
+            echo "Log format updated for $selected_domain"
+        else
+            echo "Error: Vhost configuration not found for $selected_domain at $conf"
+            exit 1
         fi
-    done
-    if [ $changed -eq 1 ]; then
-        echo "Reloading OpenLiteSpeed to apply changes..."
-        sudo systemctl reload lsws
-        echo "Log formats and access log location updated in all vhosts."
     else
-        echo "No vhost configurations found to update."
+        echo "Updating all vhost configurations to use a single access log file: $ACCESS_LOG..."
+        local changed=0
+        for conf in $VH_CONF_PATTERN; do
+            if [ -f "$conf" ]; then
+                echo "Processing $conf"
+                sudo cp "$conf" "$conf.bak.$(date +%F_%T)"
+                if grep -q "accesslog" "$conf"; then
+                    sudo sed -i '/accesslog .* {/,/}/d' "$conf"
+                fi
+                echo -e "accesslog $ACCESS_LOG {\n  useServer               1\n  logFormat               \"$DESIRED_LOG_FORMAT\"\n  logHeaders              7\n  keepDays                7\n  compressArchive         0\n}" | sudo tee -a "$conf" >/dev/null
+                changed=1
+            fi
+        done
+        if [ $changed -eq 1 ]; then
+            echo "Reloading OpenLiteSpeed to apply changes..."
+            sudo systemctl reload lsws
+            echo "Log formats and access log location updated in all vhosts."
+        else
+            echo "No vhost configurations found to update."
+        fi
     fi
 }
 
@@ -1034,7 +1089,13 @@ update() {
 case "$1" in
 --start) start ;;
 --stop) stop ;;
---fix-logs) fix_logs ;;
+--fix-logs) 
+    if [ "$2" = "--domains" ]; then
+        fix_logs "--domains"
+    else
+        fix_logs
+    fi
+    ;;
 --release-all) release_all ;;
 --release-ip)
     [ -z "$2" ] && {
@@ -1061,7 +1122,8 @@ case "$1" in
     echo " --stop               - It stops the Firewall"
     echo " --check-logs         - Monitor the Rate Limiting Stats"
     echo " --blocked-list       - Check the Blocked IPs"
-    echo " --fix-logs           - Fix the vHosts to log in access.log file"
+    echo " --fix-logs           - Fix all vHosts to log in access.log file"
+    echo " --fix-logs --domains - Select and fix logs for a specific domain"
     echo " --reset              - If the Firewall is not Working Simply Reset the Configuration"
     echo " --update             - Update the Script to the Latest Version from Github"
     echo " --release-all       - Unblock all the IPs from iptables"
