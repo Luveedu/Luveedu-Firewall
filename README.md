@@ -147,6 +147,7 @@ Luveedu Shield is a Addon for Luveedu Firewall, Which runs in background and sca
 
 Below is a detailed explanation of the available CLI options for managing and monitoring the Luveedu Shield tool.
 
+
 **Main Usage**
 
 ```luvd-shield --start``` - It starts the Blocking Engine
@@ -162,7 +163,13 @@ Below is a detailed explanation of the available CLI options for managing and mo
 ```luvd-shield --update``` - Update the Script to the Latest Version from Github
 
 
+=================
 
+Tail the Logs of Shield & Monitor in more details, BTW, everything is Automatic.
+
+```
+tail -f /var/log/luvd-shield.log
+```
 
 
 
