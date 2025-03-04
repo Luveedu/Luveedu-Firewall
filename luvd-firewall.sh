@@ -7,8 +7,15 @@
 ACCESS_LOG="/usr/local/lsws/logs/access.log"
 VH_CONF_PATTERN="/usr/local/lsws/conf/vhosts/*/vhost.conf"
 BLOCK_DURATION=$((60 * 60 * 24)) # 1 day in seconds
+
+# SET THESE NUMBERS FOR DOS ATTACK STOPPING
 REQUEST_LIMIT_PER_WINDOW=100     # Max requests per 30-second window
 WINDOW_DURATION=30               # Window duration in seconds
+
+# SET THESE NUMBERS FOR DDOS ATTACK STOPPING
+REQUEST_LIMIT_PER_SEC=15         # Max requests per short time window
+SEC_WINDOW_DURATION=3            # Short time window duration in seconds
+
 CHECK_INTERVAL=1                 # Check every 1 second
 PID_FILE="/var/run/luvd-firewall.pid"
 BLOCKED_IPS_FILE="/var/tmp/luvd-blocked-ips.txt"
@@ -206,13 +213,13 @@ block_ip() {
         return
     fi
 
-    # Check if this is an X-Forwarded-For IP breaking rate limit and ends with 0
     if [ "$reason" = "rate-limit-per-window" ] && [[ "$ip" =~ \.0$ ]]; then
         local cidr="${ip%.*}.0/24"
         if ! iptables -C INPUT -s "$cidr" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') Attempting to reject CIDR: $cidr | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
             iptables -A INPUT -s "$cidr" -j REJECT --reject-with icmp-host-prohibited
             echo "$cidr $(date +%s)" >>"$BLOCKED_IPS_FILE"
+            iptables-save >/etc/iptables/rules.v4 # Persist rules
             echo "$(date '+%Y-%m-%d %H:%M:%S') Rejected CIDR: $cidr | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
         fi
     else
@@ -220,6 +227,7 @@ block_ip() {
             echo "$(date '+%Y-%m-%d %H:%M:%S') Attempting to reject IP: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
             iptables -A INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited
             echo "$ip $(date +%s)" >>"$BLOCKED_IPS_FILE"
+            iptables-save >/etc/iptables/rules.v4 # Persist rules
             echo "$(date '+%Y-%m-%d %H:%M:%S') Rejected IP: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
         fi
     fi
@@ -261,6 +269,7 @@ unblock_expired() {
         if [ $((now - timestamp)) -ge $BLOCK_DURATION ]; then
             iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
             sed -i "/^$entry /d" "$BLOCKED_IPS_FILE"
+            iptables-save >/etc/iptables/rules.v4 # Persist rules
             if [[ "$entry" =~ /24$ ]]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') Unblocked expired CIDR: $entry" >>"$FIREWALL_LOG"
             else
@@ -276,7 +285,7 @@ release_all() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Releasing all blocked IPs and clearing logs..." >>"$FIREWALL_LOG"
     preserve_log_rule
     while read -r entry timestamp; do
-        iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
+        iptables -D INPUT -s "$entry" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null # Delete specific rule
         if [[ "$entry" =~ /24$ ]]; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') Released CIDR: $entry" >>"$FIREWALL_LOG"
         else
@@ -287,7 +296,7 @@ release_all() {
     >"$FIREWALL_LOG"
     >"$ACCESS_LOG"
     >"$LAST_LINE_FILE"
-    iptables -F INPUT 2>/dev/null
+    iptables-save >/etc/iptables/rules.v4 # Persist rules
     restore_log_rule
     echo "$(date '+%Y-%m-%d %H:%M:%S') All IPs released from iptables and blocklist, logs cleared." >>"$FIREWALL_LOG"
 }
@@ -368,7 +377,7 @@ reset() {
 
 # Function to display blocked IP list
 blocked_list() {
-    echo "Luveedu Firewall - DoS / DDoS Blocked IP List"
+    echo "Luveedu Firewall - Blocked IP List for DoS / DDoS Attack"
     if [ -s "$BLOCKED_IPS_FILE" ]; then
         echo "IP Address/CIDR   Blocked Since"
         echo "------------------  -------------------"
@@ -381,17 +390,15 @@ blocked_list() {
     fi
 }
 
-# Function to clear all logs
+# Function to clear all logs (only log files, not iptables or blocked IPs)
 clear_logs() {
-    echo "Clearing all Luveedu Firewall logs and resetting data..."
+    echo "Clearing all Luveedu Firewall logs..."
     preserve_log_rule
-    >"$FIREWALL_LOG"
-    >"$ACCESS_LOG"
-    >"$BLOCKED_IPS_FILE"
-    >"$LAST_LINE_FILE"
-    iptables -F INPUT 2>/dev/null
+    >"$FIREWALL_LOG"  # Clear firewall log
+    >"$ACCESS_LOG"    # Clear access log
+    >"$LAST_LINE_FILE" # Clear last line file
     restore_log_rule
-    echo "All logs cleared and firewall data reset."
+    echo "All logs cleared."
 }
 
 # Function to fix log formats
@@ -422,14 +429,14 @@ fix_logs() {
 check_logs() {
     echo "Luveedu Firewall - DoS / DDoS Blocking (Realtime)"
     echo "------------------------------------------------------------"
-    echo "IP Address        | Requests/30s | Requests/3s | Status"
+    echo "IP Address        | Requests/${WINDOW_DURATION}s | Requests/${SEC_WINDOW_DURATION}s | Status"
     echo "------------------------------------------------------------"
 
     declare -A ip_status
     declare -A ip_win_count          # For 100/30s
-    declare -A ip_sec_count          # For 15/3s
+    declare -A ip_sec_count          # For configurable short window
     local last_win_reset=$(date +%s) # Last reset for 30s window
-    local last_sec_reset=$(date +%s) # Last reset for 3s window
+    local last_sec_reset=$(date +%s) # Last reset for short window
 
     # Helper function to check if an IP is within a blocked CIDR
     is_ip_in_blocked_cidr() {
@@ -439,17 +446,22 @@ check_logs() {
                 local cidr_base="${entry%/24}"
                 local ip_base="${check_ip%.*}"
                 if [ "$cidr_base" = "$ip_base" ]; then
-                    return 0 # IP is within blocked CIDR
+                    return 0
                 fi
             fi
         done <"$BLOCKED_IPS_FILE"
-        return 1 # IP not within any blocked CIDR
+        while read -r entry _; do
+            if [ "$entry" = "$check_ip" ]; then
+                return 0
+            fi
+        done <"/var/tmp/luvd-shield-blocked-ips.txt"
+        return 1
     }
 
     tail -n 1000 -f "$FIREWALL_LOG" | while read -r line; do
         local now=$(date +%s)
         local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s') # 30s cutoff
-        local sec_cutoff=$(date -d "-3 seconds" '+%s')            # 3s cutoff for counting
+        local sec_cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s') # Configurable short window cutoff
 
         # Reset Requests/30s every 30 seconds
         if [ $((now - last_win_reset)) -ge 30 ]; then
@@ -462,15 +474,15 @@ check_logs() {
             echo "$(date '+%Y-%m-%d %H:%M:%S') Reset Requests/30s counters" >>"$FIREWALL_LOG"
         fi
 
-        # Reset Requests/3s every 4 seconds
-        if [ $((now - last_sec_reset)) -ge 4 ]; then
+        # Reset Requests/short window every SEC_WINDOW_DURATION + 1 seconds
+        if [ $((now - last_sec_reset)) -ge $((SEC_WINDOW_DURATION + 1)) ]; then
             for ip in "${!ip_sec_count[@]}"; do
                 if [[ "${ip_status[$ip]}" != Blocked* ]]; then
                     ip_sec_count[$ip]=0
                 fi
             done
             last_sec_reset=$now
-            echo "$(date '+%Y-%m-%d %H:%M:%S') Reset Requests/3s counters" >>"$FIREWALL_LOG"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Reset Requests/${SEC_WINDOW_DURATION}s counters" >>"$FIREWALL_LOG"
         fi
 
         # Parse log lines for IP and status updates
@@ -508,11 +520,11 @@ check_logs() {
                         else
                             ip_status[$ip]="Processing"
                         fi
-                        # Update 30-second window count (real-time within 30s)
+                        # Update 30-second window count
                         if [ "$ts_seconds" -ge "$cutoff" ]; then
                             ip_win_count[$ip]=$((${ip_win_count[$ip]:-0} + 1))
                         fi
-                        # Update 3-second count (real-time within 3s)
+                        # Update short window count
                         if [ "$ts_seconds" -ge "$sec_cutoff" ]; then
                             ip_sec_count[$ip]=$((${ip_sec_count[$ip]:-0} + 1))
                         fi
@@ -529,7 +541,7 @@ check_logs() {
         printf "\033c"
         echo "Luveedu Firewall - DoS / DDoS Blocking (Realtime)"
         echo "------------------------------------------------------------"
-        echo "IP Address        | Requests/30s | Requests/3s | Status"
+        echo "IP Address        | Requests/${WINDOW_DURATION}s | Requests/${SEC_WINDOW_DURATION}s | Status"
         echo "------------------------------------------------------------"
         if [ ${#ip_status[@]} -eq 0 ]; then
             echo "No activity detected yet."
@@ -713,33 +725,32 @@ monitor_requests() {
     exit 0
 }
 
-# Function to monitor requests per 3 seconds
+# Function to monitor requests per short time window (e.g., 15/3s)
 monitor_per_second_rate() {
     local ip="$1"
     local timestamp="$2"
     local ip_to_block="$3"
+    
+    # Use a single key combining IP and short time window
+    local window_start=$((timestamp - (timestamp % SEC_WINDOW_DURATION)))  # Align to SEC_WINDOW_DURATION
+    local sec_key="$ip,$window_start"
 
-    # Use associative array for per-3-second tracking
-    declare -A ip_per_sec_counts
-    declare -A ip_per_sec_timestamps
-
-    # Key for this specific 3-second window
-    local sec_key="$ip,$timestamp"
-
-    # Increment count for this IP at this timestamp
+    # Increment count for this IP in this short time window
     ip_per_sec_counts["$sec_key"]=$((${ip_per_sec_counts[$sec_key]:-0} + 1))
-    ip_per_sec_timestamps["$sec_key"]="$timestamp"
+    ip_per_sec_timestamps["$sec_key"]="$window_start"
 
-    # Check if rate exceeds 15 requests per 3 seconds
-    if [ "${ip_per_sec_counts[$sec_key]}" -gt 15 ]; then
+    # Check if rate exceeds the configured limit for the short time window
+    if [ "${ip_per_sec_counts[$sec_key]}" -gt "$REQUEST_LIMIT_PER_SEC" ]; then
         if ! in_list "$ip_to_block" "WHITELIST"; then
-            block_ip "$ip_to_block" "rate-limit-per-3-seconds" "${ip_per_sec_counts[$sec_key]} req/3s"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') IP $ip_to_block exceeded 15 req/3s limit: ${ip_per_sec_counts[$sec_key]} requests" >>"$FIREWALL_LOG"
+            block_ip "$ip_to_block" "rate-limit-per-$SEC_WINDOW_DURATION-seconds" "${ip_per_sec_counts[$sec_key]} req/${SEC_WINDOW_DURATION}s"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') IP $ip_to_block exceeded $REQUEST_LIMIT_PER_SEC req/${SEC_WINDOW_DURATION}s limit: ${ip_per_sec_counts[$sec_key]} requests" >>"$FIREWALL_LOG"
             return 1 # Indicate block occurred
         fi
     fi
     return 0 # No block needed
 }
+
+
 
 # Modified monitor_requests function with new per-3-second rate limiting
 monitor_requests() {
@@ -784,7 +795,7 @@ monitor_requests() {
             fi
 
             local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s')
-            local sec_cutoff=$(date -d "-3 seconds" '+%s') # 3s cutoff for per-3-second rate
+            local sec_cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s')  # Use configurable short window
             local total_lines=$(wc -l <"$ACCESS_LOG")
             local lines_to_process=$((total_lines - last_lines_processed))
             local lines_processed=0
@@ -830,35 +841,35 @@ monitor_requests() {
                                         block_ip "$ip_to_block" "blacklist" "0"
                                         unset ip_counts_by_window["$ip_win_key"]
                                         unset ip_timestamps["$ip_win_key,"*]
-                                        unset ip_per_sec_counts["$ip_win_key,$ts_seconds"]
-                                        unset ip_per_sec_timestamps["$ip_win_key,$ts_seconds"]
+                                        unset ip_per_sec_counts["$ip_win_key,"*]
+                                        unset ip_per_sec_timestamps["$ip_win_key,"*]
                                         continue
                                     fi
 
                                     if ! in_list "$ip_to_block" "WHITELIST"; then
-                                        # Check per-3-second rate limit first
-                                        ip_per_sec_counts["$ip_win_key,$ts_seconds"]=$((${ip_per_sec_counts[$ip_win_key,$ts_seconds]:-0} + 1))
-                                        ip_per_sec_timestamps["$ip_win_key,$ts_seconds"]="$ts_seconds"
-                                        if [ "$ts_seconds" -ge "$sec_cutoff" ] && [ "${ip_per_sec_counts[$ip_win_key,$ts_seconds]}" -gt 15 ]; then
-                                            block_ip "$ip_to_block" "rate-limit-per-3-seconds" "${ip_per_sec_counts[$ip_win_key,$ts_seconds]} req/3s"
-                                            unset ip_counts_by_window["$ip_win_key"]
-                                            unset ip_timestamps["$ip_win_key,"*]
-                                            unset ip_per_sec_counts["$ip_win_key,$ts_seconds"]
-                                            unset ip_per_sec_timestamps["$ip_win_key,$ts_seconds"]
-                                            continue
+                                        # Check per-short-window rate limit first
+                                        if [ "$ts_seconds" -ge "$sec_cutoff" ]; then
+                                            monitor_per_second_rate "$ip_to_monitor" "$ts_seconds" "$ip_to_block"
+                                            if [ $? -eq 1 ]; then
+                                                unset ip_counts_by_window["$ip_win_key"]
+                                                unset ip_timestamps["$ip_win_key,"*]
+                                                unset ip_per_sec_counts["$ip_win_key,"*]
+                                                unset ip_per_sec_timestamps["$ip_win_key,"*]
+                                                continue
+                                            fi
                                         fi
 
-                                        # Existing 100/30s rate limiting
+                                        # 100/30s rate limiting
                                         ip_counts_by_window["$ip_win_key"]=$((${ip_counts_by_window[$ip_win_key]:-0} + 1))
                                         ip_timestamps["$ip_win_key,$ts_seconds"]=1
-                                        echo "$(date '+%Y-%m-%d %H:%M:%S') Request logged for IP $ip_to_monitor | Window count: ${ip_counts_by_window[$ip_win_key]} | Per-3s count: ${ip_per_sec_counts[$ip_win_key,$ts_seconds]} | PID: $$" >>"$FIREWALL_LOG"
+                                        echo "$(date '+%Y-%m-%d %H:%M:%S') Request logged for IP $ip_to_monitor | Window count: ${ip_counts_by_window[$ip_win_key]} | PID: $$" >>"$FIREWALL_LOG"
 
                                         if [ "${ip_counts_by_window[$ip_win_key]}" -gt "$REQUEST_LIMIT_PER_WINDOW" ]; then
                                             block_ip "$ip_to_block" "rate-limit-per-window" "${ip_counts_by_window[$ip_win_key]} req/30s"
                                             unset ip_counts_by_window["$ip_win_key"]
                                             unset ip_timestamps["$ip_win_key,"*]
-                                            unset ip_per_sec_counts["$ip_win_key,$ts_seconds"]
-                                            unset ip_per_sec_timestamps["$ip_win_key,$ts_seconds"]
+                                            unset ip_per_sec_counts["$ip_win_key,"*]
+                                            unset ip_per_sec_timestamps["$ip_win_key,"*]
                                             continue
                                         fi
                                     else
@@ -876,7 +887,7 @@ monitor_requests() {
                 echo "$(date '+%Y-%m-%d %H:%M:%S') Processed $lines_processed new lines from access log (total lines: $total_lines)" >>"$FIREWALL_LOG"
             fi
 
-            # Clean up expired timestamps for both rate limits
+            # Clean up expired timestamps
             for key in "${!ip_timestamps[@]}"; do
                 IFS=',' read -r ip ts <<<"$key"
                 if [ "$ts" -lt "$cutoff" ]; then
@@ -890,13 +901,13 @@ monitor_requests() {
 
             for key in "${!ip_per_sec_timestamps[@]}"; do
                 IFS=',' read -r ip ts <<<"$key"
-                if [ "$ts" -lt "$sec_cutoff" ]; then # Check per-3-second expiration
+                if [ "$ts" -lt "$sec_cutoff" ]; then
                     unset ip_per_sec_counts["$key"]
                     unset ip_per_sec_timestamps["$key"]
                 fi
             done
 
-            # Check and block based on existing 100/30s limit
+            # Check 100/30s limit
             for ip in "${!ip_counts_by_window[@]}"; do
                 win_rate="${ip_counts_by_window[$ip]}"
                 if [ "$win_rate" -gt "$REQUEST_LIMIT_PER_WINDOW" ] && ! in_list "$ip" "WHITELIST"; then
@@ -925,6 +936,9 @@ monitor_requests() {
 start() {
     if [ -f "$PID_FILE" ]; then
         echo "Luveedu Firewall is already running (PID: $(cat $PID_FILE))"
+    fi
+    if [ -s "/etc/iptables/rules.v4" ]; then
+        iptables-restore </etc/iptables/rules.v4 || echo "Failed to restore iptables rules"
     fi
     monitor_requests &>>"$FIREWALL_LOG" &
     local pid=$!

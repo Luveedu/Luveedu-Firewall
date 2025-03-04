@@ -24,6 +24,10 @@ log() {
 # Function to block IP
 block_ip() {
     local ip="$1"
+    if grep -q "^$ip " "/var/tmp/luvd-blocked-ips.txt"; then
+        log "IP $ip already blocked by luvd-firewall, skipping"
+        return
+    fi
     if ! iptables -C INPUT -s "$ip" -j DROP 2>/dev/null; then
         iptables -A INPUT -s "$ip" -j DROP
         echo "$ip $(date +%s)" >>"$SHIELD_BLOCKED_IPS_FILE"
@@ -33,7 +37,6 @@ block_ip() {
         log "IP $ip already blocked"
     fi
 }
-
 # Function to unblock expired IPs without removing LOG rule
 unblock_expired() {
     local now=$(date +%s)
@@ -266,14 +269,16 @@ fix_all() {
         exit 1
     fi
 
-    # Only log all new connections, no filtering in iptables
-    iptables -F
-    iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
+    # Preserve existing rules, only ensure LOG rule exists
+    if ! iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
+        iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
+    fi
 
-    iptables-save >"$IPTABLES_RULES_FILE"
+    iptables-save >/etc/iptables/rules.v4
     log "iptables rules set to log all new connections (Server IP: $SERVER_IP)"
     echo "iptables rules set to log all new connections (Server IP: $SERVER_IP)"
 }
+
 
 # Function to update script
 update() {
