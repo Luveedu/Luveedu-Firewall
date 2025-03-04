@@ -42,7 +42,7 @@ mark_failed() {
 # Function to display completion
 display_completion() {
     echo >&3
-    echo "//////////// COMPLETED \\\\\\\\\\\\\\\" >&3
+    echo "//////////////// COMPLETED ////////////////" >&3
     echo "For more information visit: https://github.com/Luveedu/Luveedu-Firewall" >&3
     echo "Installation Log saved in: $LOG_FILE" >&3
 }
@@ -50,7 +50,8 @@ display_completion() {
 # Function to display failure
 display_failure() {
     echo >&3
-    echo "//////////////// FAILED \\\\\\\\\\\\\\\\\\\" >&3
+    echo "//////////////// FAILED ////////////////" >&3
+    echo "For more information visit: https://github.com/Luveedu/Luveedu-Firewall" >&3
     echo "Installation failed. Check the log for details: $LOG_FILE" >&3
 }
 
