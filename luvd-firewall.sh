@@ -731,25 +731,38 @@ monitor_per_second_rate() {
     local timestamp="$2"
     local ip_to_block="$3"
     
-    # Use a single key combining IP and short time window
-    local window_start=$((timestamp - (timestamp % SEC_WINDOW_DURATION)))  # Align to SEC_WINDOW_DURATION
+    # Align to the start of the current 3-second window
+    local window_start=$((timestamp - (timestamp % SEC_WINDOW_DURATION)))
     local sec_key="$ip,$window_start"
 
-    # Increment count for this IP in this short time window
+    # Increment count for this window
     ip_per_sec_counts["$sec_key"]=$((${ip_per_sec_counts[$sec_key]:-0} + 1))
     ip_per_sec_timestamps["$sec_key"]="$window_start"
 
-    # Check if rate exceeds the configured limit for the short time window
-    if [ "${ip_per_sec_counts[$sec_key]}" -gt "$REQUEST_LIMIT_PER_SEC" ]; then
-        if ! in_list "$ip_to_block" "WHITELIST"; then
-            block_ip "$ip_to_block" "rate-limit-per-$SEC_WINDOW_DURATION-seconds" "${ip_per_sec_counts[$sec_key]} req/${SEC_WINDOW_DURATION}s"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') IP $ip_to_block exceeded $REQUEST_LIMIT_PER_SEC req/${SEC_WINDOW_DURATION}s limit: ${ip_per_sec_counts[$sec_key]} requests" >>"$FIREWALL_LOG"
-            return 1 # Indicate block occurred
+    # Clean up expired windows for this IP
+    for key in "${!ip_per_sec_timestamps[@]}"; do
+        IFS=',' read -r check_ip ts <<<"$key"
+        if [ "$check_ip" = "$ip" ] && [ "$ts" -lt "$((window_start - SEC_WINDOW_DURATION))" ]; then
+            unset ip_per_sec_counts["$key"]
+            unset ip_per_sec_timestamps["$key"]
         fi
-    fi
-    return 0 # No block needed
-}
+    done
 
+    # Check and block if limit exceeded
+    if [ "${ip_per_sec_counts[$sec_key]}" -gt "$REQUEST_LIMIT_PER_SEC" ] && ! in_list "$ip_to_block" "WHITELIST"; then
+        block_ip "$ip_to_block" "rate-limit-per-$SEC_WINDOW_DURATION-seconds" "${ip_per_sec_counts[$sec_key]} req/${SEC_WINDOW_DURATION}s"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Blocked IP $ip_to_block for exceeding $REQUEST_LIMIT_PER_SEC req/${SEC_WINDOW_DURATION}s: ${ip_per_sec_counts[$sec_key]} requests" >>"$FIREWALL_LOG"
+        # Clear counts for this IP to prevent double-blocking
+        for key in "${!ip_per_sec_counts[@]}"; do
+            if [[ "$key" == "$ip,"* ]]; then
+                unset ip_per_sec_counts["$key"]
+                unset ip_per_sec_timestamps["$key"]
+            fi
+        done
+        return 1
+    fi
+    return 0
+}
 
 
 # Modified monitor_requests function with new per-3-second rate limiting
