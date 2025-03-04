@@ -16,7 +16,7 @@ exec 3>&1 >"$LOG_FILE" 2>&1
 # Function to display header
 display_header() {
     echo "----------------------------------------------------------" >&3
-    echo "             Luveedu Firewall System - v1.0.2             " >&3
+    echo "             Luveedu Firewall System - v1.1.5             " >&3
     echo "----------------------------------------------------------" >&3
     echo "Installation Log: $LOG_FILE          " >&3
     echo >&3
@@ -116,12 +116,6 @@ install_luvd_firewall() {
     
     if [ -f "$target" ]; then
         echo "Existing luvd-firewall found, updating..."
-        echo "Prompting user for vHost reconfiguration" >&3
-        read -p "Would You Like to Re-configure vHost Logging? (y/N): " choice >&3
-        case "$choice" in
-            y|Y) echo "User chose to re-configure vHost logging" ;;
-            *) echo "Skipping vHost re-configuration" ;;
-        esac
         wget -O "$target" "$url" 2>/dev/null || { echo "Failed to update luvd-firewall"; mark_failed "Installing Luveedu Firewall"; }
         sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
@@ -135,6 +129,9 @@ install_luvd_firewall() {
         sudo sed -i 's/\r$//' "$target"
         chmod +x "$target"
         echo "luvd-firewall installed at $target"
+        echo "Running initial configuration"
+        "$target" --fix-logs || mark_failed "Installing Luveedu Firewall"
+        echo "Luveedu Firewall installed successfully!"
     fi
     mark_done "Installing Luveedu Firewall"
 }
