@@ -589,7 +589,7 @@ update() {
     echo "Updating Luveedu Firewall from GitHub..."
     if curl -s --max-time 10 "$github_url" -o "$temp_file" 2>/dev/null && [ -s "$temp_file" ] && head -n 1 "$temp_file" | grep -q '^#!/bin/bash'; then
         cp "$script_path" "$script_path.bak.$(date +%F_%T)"
-        sed -i 's/\r$//' "$script_path"
+        sed -i 's/\r$//' "$temp_file"
         chmod +x "$temp_file"
         mv "$temp_file" "$script_path"
         echo "$(date '+%Y-%m-%d %H:%M:%S') Successfully updated script" >>"$FIREWALL_LOG"
