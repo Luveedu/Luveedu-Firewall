@@ -2,6 +2,14 @@
 
 Our thinking is totally different, we always think beyond boudaries and updates. We will not maintain any version, we will simply put and fix issues based on the causes.
 
+## Last Issues Resolved - 08/03/2025
+
+```
+- Major Update in Firewall - DOS / DDOS Blocking
+- Improved the Logging of IPs ( 10X Faster )
+- Multiple Threads to Detect DoS / DDoS Attacks
+```
+
 ## Last Issues Resolved - 04/03/2025
 
 ```
