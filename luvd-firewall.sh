@@ -314,7 +314,7 @@ check_logs() {
     local last_win_reset=$(date +%s)
     local last_sec_reset=$(date +%s)
 
-    tail -n 1000 -f "$FIREWALL_LOG" | while read -r line; do
+    tail -f -n 500 "$FIREWALL_LOG" | while read -r line; do
         local now=$(date +%s)
         local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s')
         local sec_cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s')
