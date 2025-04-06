@@ -33,9 +33,10 @@ MALICIOUS_UA_REGEX=(
 )
 
 MALICIOUS_REF_REGEX=(
-    "^\d+$"  # Known spam referrers
+    ".*(semalt\.com|buttons-for-website\.com|darodar\.com).*"  # Known spam referrers
     ".*(sql\.inject|union.*select|eval\(|\.\./\.\.).*"  # Basic injection attempts
     ".*(viagra|cialis|porn|casino|xanax).*"  # Common spam keywords
+    ".*([0-9]{5,}\.com).*"  # Numeric domains with 5+ digits
 )
 
 # Ensure required files exist
@@ -44,7 +45,13 @@ touch "$BLOCKED_IPS_FILE" "$FIREWALL_LOG" "$LAST_LINE_FILE"
 # Simplified function to extract main IP from OLS log line (no validation)
 get_ips() {
     local line="$1"
-    echo "$line" | awk '{print $2}' # Main IP is always assumed valid
+    local ip=$(echo "$line" | awk '{print $1}')
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Invalid IP extracted: $ip from line: $line" >>"$FIREWALL_LOG"
+        echo ""  # Return empty string to skip invalid IPs
+    fi
 }
 
 # Function to check IP via API without caching
@@ -485,8 +492,8 @@ monitor_3s_requests() {
 
             if [ "$lines_to_process" -gt 0 ]; then
                 tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
-                    main_ip=$(get_ips "$line")
-                    if [ -n "$main_ip" ] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+main_ip=$(get_ips "$line")
+if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
                         # Check User-Agent and Referrer first
                         if check_ua_referrer "$line" "$main_ip"; then
                             continue  # Skip to next line if blocked
@@ -549,8 +556,8 @@ monitor_30s_requests() {
 
             if [ "$lines_to_process" -gt 0 ]; then
                 tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
-                    main_ip=$(get_ips "$line")
-                    if [ -n "$main_ip" ] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+main_ip=$(get_ips "$line")
+if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
                         # Check User-Agent and Referrer first
                         if check_ua_referrer "$line" "$main_ip"; then
                             continue  # Skip to next line if blocked
