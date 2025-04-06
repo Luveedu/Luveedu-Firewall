@@ -45,12 +45,20 @@ touch "$BLOCKED_IPS_FILE" "$FIREWALL_LOG" "$LAST_LINE_FILE"
 # Simplified function to extract main IP from OLS log line (no validation)
 get_ips() {
     local line="$1"
-    local ip=$(echo "$line" | awk '{print $1}')
+    local first_field=$(echo "$line" | awk '{print $1}')
     
-    # IPv4 regex
+    # Check if the first field is a hostname in brackets (e.g., ["krownlinks.com"])
+    if [[ "$first_field" =~ ^\[.*\]$ ]]; then
+        # Extract the second field as the IP
+        local ip=$(echo "$line" | awk '{print $2}')
+    else
+        # Use the first field as the IP (for logs without hostname prefix)
+        local ip="$first_field"
+    fi
+    
+    # Validate IP (IPv4 or IPv6)
     if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "$ip"
-    # IPv6 regex (simplified, covers common formats)
     elif [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){7}[0-9a-fA-F]{0,4}$ ]]; then
         echo "$ip"
     else
@@ -347,6 +355,27 @@ fix_logs() {
     fi
 }
 
+# Function to check request URL for malicious patterns
+check_url() {
+    local line="$1"
+    local ip="$2"
+    
+    # Extract the request field (e.g., "GET /?=tgXycUSu HTTP/1.1")
+    local request=$(echo "$line" | awk -F'"' '{print $2}')
+    
+    # Debug logging
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Checking request: $request for IP: $ip" >>"$FIREWALL_LOG"
+    
+    # Check for /?= pattern
+    if [[ "$request" =~ /\?= ]]; then
+        block_ip "$ip" "malicious-url" "URL: $request"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Blocked IP $ip due to URL match: $request (Pattern: /\?=)" >>"$FIREWALL_LOG"
+        return 0
+    fi
+    
+    return 1
+}
+
 # Function to check User-Agent and Referrer against regex patterns
 check_ua_referrer() {
     local line="$1"
@@ -503,6 +532,7 @@ rotate_logs() {
     fi
 }
 
+
 # Replace the existing monitor_3s_requests function with this:
 monitor_3s_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Started 3s monitoring (PID: $$)" >>"$FIREWALL_LOG"
@@ -522,10 +552,14 @@ monitor_3s_requests() {
 
             if [ "$lines_to_process" -gt 0 ]; then
                 tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
-main_ip=$(get_ips "$line")
-if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+                    main_ip=$(get_ips "$line")
+                    if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
                         # Check User-Agent and Referrer first
                         if check_ua_referrer "$line" "$main_ip"; then
+                            continue  # Skip to next line if blocked
+                        fi
+                        # Check URL pattern
+                        if check_url "$line" "$main_ip"; then
                             continue  # Skip to next line if blocked
                         fi
                         
@@ -567,6 +601,7 @@ if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && 
     done
 }
 
+
 # Replace the existing monitor_30s_requests function with this:
 monitor_30s_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Started 30s monitoring (PID: $$)" >>"$FIREWALL_LOG"
@@ -586,10 +621,14 @@ monitor_30s_requests() {
 
             if [ "$lines_to_process" -gt 0 ]; then
                 tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
-main_ip=$(get_ips "$line")
-if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+                    main_ip=$(get_ips "$line")
+                    if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
                         # Check User-Agent and Referrer first
                         if check_ua_referrer "$line" "$main_ip"; then
+                            continue  # Skip to next line if blocked
+                        fi
+                        # Check URL pattern
+                        if check_url "$line" "$main_ip"; then
                             continue  # Skip to next line if blocked
                         fi
                         
@@ -630,6 +669,8 @@ if [ -n "$main_ip" ] && [[ "$main_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && 
         sleep "$CHECK_INTERVAL"
     done
 }
+
+
 
 # Start the firewall with both monitors
 start() {
