@@ -25,6 +25,19 @@ TEMP_LOG="/tmp/luvd-firewall-temp.log"
 LAST_LINE_FILE="/var/tmp/luvd-firewall-last-line.txt"
 CHECK_API="https://waf.luveedu.cloud/checkip.php?ip="
 
+MALICIOUS_UA_REGEX=(
+    ".*(bot|crawl|spider|slurp|archiver|curl|wget|python-requests|scrapy|httpclient).*"  # Common bots and scrapers
+    ".*(sqlmap|nikto|burp|owasp|acunetix|netsparker).*"  # Security scanners
+    ".*(masscan|nmap|zmap).*"  # Port scanners
+    ".*(Mozilla/5\.0 \(compatible; .*; .*Googlebot.*\)).*"  # Fake Googlebot
+)
+
+MALICIOUS_REF_REGEX=(
+    ".*(semalt\.com|buttons-for-website\.com|darodar\.com).*"  # Known spam referrers
+    ".*(sql\.inject|union.*select|eval\(|\.\./\.\.).*"  # Basic injection attempts
+    ".*(viagra|cialis|porn|casino|xanax).*"  # Common spam keywords
+)
+
 # Ensure required files exist
 touch "$BLOCKED_IPS_FILE" "$FIREWALL_LOG" "$LAST_LINE_FILE"
 
@@ -301,6 +314,39 @@ fix_logs() {
     fi
 }
 
+# Function to check User-Agent and Referrer against regex patterns
+check_ua_referrer() {
+    local line="$1"
+    local ip="$2"
+    
+    # Extract User-Agent (last field in quotes)
+    local ua=$(echo "$line" | awk -F'"' '{print $(NF-1)}')
+    # Extract Referrer (second to last field in quotes, if present)
+    local referrer=$(echo "$line" | awk -F'"' '{print $(NF-3)}' | grep -v "^-")
+    
+    # Check User-Agent against malicious patterns
+    for pattern in "${MALICIOUS_UA_REGEX[@]}"; do
+        if [[ "$ua" =~ $pattern ]]; then
+            block_ip "$ip" "malicious-user-agent" "UA: $ua"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Blocked IP $ip due to User-Agent match: $ua (Pattern: $pattern)" >>"$FIREWALL_LOG"
+            return 0
+        fi
+    done
+    
+    # Check Referrer against malicious patterns (if present)
+    if [ -n "$referrer" ]; then
+        for pattern in "${MALICIOUS_REF_REGEX[@]}"; do
+            if [[ "$referrer" =~ $pattern ]]; then
+                block_ip "$ip" "malicious-referrer" "Ref: $referrer"
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Blocked IP $ip due to Referrer match: $referrer (Pattern: $pattern)" >>"$FIREWALL_LOG"
+                return 0
+            fi
+        done
+    fi
+    
+    return 1
+}
+
 # Function to check logs (unchanged)
 check_logs() {
     echo "Luveedu Firewall - DoS / DDoS Blocking (Realtime)"
@@ -420,7 +466,7 @@ rotate_logs() {
     fi
 }
 
-# Monitor requests for 3-second window
+# Replace the existing monitor_3s_requests function with this:
 monitor_3s_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Started 3s monitoring (PID: $$)" >>"$FIREWALL_LOG"
     trap 'echo "$(date "+%Y-%m-%d %H:%M:%S") 3s monitoring terminated (PID: $$)" >> "$FIREWALL_LOG"; exit' SIGTERM SIGINT
@@ -441,6 +487,11 @@ monitor_3s_requests() {
                 tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
                     main_ip=$(get_ips "$line")
                     if [ -n "$main_ip" ] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+                        # Check User-Agent and Referrer first
+                        if check_ua_referrer "$line" "$main_ip"; then
+                            continue  # Skip to next line if blocked
+                        fi
+                        
                         timestamp=$(echo "$line" | grep -oP '\[\K\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}')
                         if [ -n "$timestamp" ]; then
                             ts_reformat=$(echo "$timestamp" | sed 's|/| |g; s/:/ /; s/ \([+-]\)/ \1/')
@@ -479,7 +530,7 @@ monitor_3s_requests() {
     done
 }
 
-# Monitor requests for 30-second window
+# Replace the existing monitor_30s_requests function with this:
 monitor_30s_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Started 30s monitoring (PID: $$)" >>"$FIREWALL_LOG"
     trap 'echo "$(date "+%Y-%m-%d %H:%M:%S") 30s monitoring terminated (PID: $$)" >> "$FIREWALL_LOG"; exit' SIGTERM SIGINT
@@ -500,6 +551,11 @@ monitor_30s_requests() {
                 tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
                     main_ip=$(get_ips "$line")
                     if [ -n "$main_ip" ] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+                        # Check User-Agent and Referrer first
+                        if check_ua_referrer "$line" "$main_ip"; then
+                            continue  # Skip to next line if blocked
+                        fi
+                        
                         timestamp=$(echo "$line" | grep -oP '\[\K\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}')
                         if [ -n "$timestamp" ]; then
                             ts_reformat=$(echo "$timestamp" | sed 's|/| |g; s/:/ /; s/ \([+-]\)/ \1/')
