@@ -3,6 +3,8 @@
 # Luveedu Firewall - DoS Prevention Tool for OpenLiteSpeed
 # File: /usr/local/bin/luvd-firewall
 
+UNDER_ATTACK_MODE=0
+
 # Configuration
 ACCESS_LOG="/usr/local/lsws/logs/access.log"
 VH_CONF_PATTERN="/usr/local/lsws/conf/vhosts/*/vhost.conf"
@@ -120,6 +122,23 @@ check_ip() {
     else
         echo "Invalid IP format. Use --check-ip <IP> (e.g., --check-ip 8.8.8.8)"
         exit 1
+    fi
+}
+
+# Function to handle under attack mode
+under_attack_mode() {
+    local mode="$1"
+    if [ "$mode" = "on" ]; then
+        UNDER_ATTACK_MODE=1
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Under Attack Mode enabled - blocking all IPs" >>"$FIREWALL_LOG"
+        echo "Under Attack Mode ON - All IPs will be blocked"
+    elif [ "$mode" = "off" ]; then
+        UNDER_ATTACK_MODE=0
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Under Attack Mode disabled - returning to normal operation" >>"$FIREWALL_LOG"
+        echo "Under Attack Mode OFF - Normal operation resumed"
+    else
+        echo "Current Under Attack Mode status: $UNDER_ATTACK_MODE (0=off, 1=on)"
+        echo "Use: --under-attack on|off"
     fi
 }
 
@@ -533,7 +552,6 @@ rotate_logs() {
 }
 
 
-# Replace the existing monitor_3s_requests function with this:
 monitor_3s_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Started 3s monitoring (PID: $$)" >>"$FIREWALL_LOG"
     trap 'echo "$(date "+%Y-%m-%d %H:%M:%S") 3s monitoring terminated (PID: $$)" >> "$FIREWALL_LOG"; exit' SIGTERM SIGINT
@@ -545,6 +563,28 @@ monitor_3s_requests() {
     declare -A ip_timestamps
 
     while [ -f "$PID_FILE" ]; do
+        if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
+            if [ -f "$ACCESS_LOG" ] && [ -r "$ACCESS_LOG" ]; then
+                local total_lines=$(wc -l <"$ACCESS_LOG")
+                local lines_to_process=$((total_lines - last_lines_processed))
+
+                if [ "$lines_to_process" -gt 0 ]; then
+                    tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
+                        main_ip=$(get_ips "$line")
+                        if [ -n "$main_ip" ] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+                            if ! in_list "$main_ip" "WHITELIST"; then
+                                block_ip "$main_ip" "under-attack-mode" "immediate"
+                            fi
+                        fi
+                    done
+                    last_lines_processed=$total_lines
+                    echo "$last_lines_processed" >"$LAST_LINE_FILE"
+                fi
+            fi
+            sleep "$CHECK_INTERVAL"
+            continue
+        fi
+
         if [ -f "$ACCESS_LOG" ] && [ -r "$ACCESS_LOG" ]; then
             local cutoff=$(date -d "-$SEC_WINDOW_DURATION seconds" '+%s')
             local total_lines=$(wc -l <"$ACCESS_LOG")
@@ -601,8 +641,6 @@ monitor_3s_requests() {
     done
 }
 
-
-# Replace the existing monitor_30s_requests function with this:
 monitor_30s_requests() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') Started 30s monitoring (PID: $$)" >>"$FIREWALL_LOG"
     trap 'echo "$(date "+%Y-%m-%d %H:%M:%S") 30s monitoring terminated (PID: $$)" >> "$FIREWALL_LOG"; exit' SIGTERM SIGINT
@@ -614,6 +652,28 @@ monitor_30s_requests() {
     declare -A ip_timestamps
 
     while [ -f "$PID_FILE" ]; do
+        if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
+            if [ -f "$ACCESS_LOG" ] && [ -r "$ACCESS_LOG" ]; then
+                local total_lines=$(wc -l <"$ACCESS_LOG")
+                local lines_to_process=$((total_lines - last_lines_processed))
+
+                if [ "$lines_to_process" -gt 0 ]; then
+                    tail -n "$lines_to_process" "$ACCESS_LOG" | while IFS= read -r line; do
+                        main_ip=$(get_ips "$line")
+                        if [ -n "$main_ip" ] && ! grep -q "^$main_ip " "$BLOCKED_IPS_FILE"; then
+                            if ! in_list "$main_ip" "WHITELIST"; then
+                                block_ip "$main_ip" "under-attack-mode" "immediate"
+                            fi
+                        fi
+                    done
+                    last_lines_processed=$total_lines
+                    echo "$last_lines_processed" >"$LAST_LINE_FILE"
+                fi
+            fi
+            sleep "$CHECK_INTERVAL"
+            continue
+        fi
+
         if [ -f "$ACCESS_LOG" ] && [ -r "$ACCESS_LOG" ]; then
             local cutoff=$(date -d "-$WINDOW_DURATION seconds" '+%s')
             local total_lines=$(wc -l <"$ACCESS_LOG")
@@ -669,7 +729,6 @@ monitor_30s_requests() {
         sleep "$CHECK_INTERVAL"
     done
 }
-
 
 
 # Start the firewall with both monitors
@@ -755,6 +814,7 @@ case "$1" in
 --clear-logs) clear_logs ;;
 --reset) reset ;;
 --update) update ;;
+--under-attack) under_attack_mode "$2" ;;
 *)
     echo "Usage: luvd-firewall [OPTION] [ARGUMENT]"
     echo " --start              - Start the Firewall"
@@ -769,6 +829,7 @@ case "$1" in
     echo " --release-ip 8.8.8.8 - Unblock a specific IP"
     echo " --check-ip 8.8.8.8   - Check IP status"
     echo " --clear-logs         - Clear logs"
+    echo " --under-attack on|off - Enable/disable Under Attack Mode (blocks all non-whitelisted IPs)"
     exit 1
     ;;
 esac
