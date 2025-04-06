@@ -2,6 +2,8 @@
 # File: /usr/local/bin/luvd-shield
 # Luveedu Shield - A Realtime Bad Bots and IP Blocking Solution
 
+UNDER_ATTACK_MODE=0
+
 CHECK_API="https://waf.luveedu.cloud/checkip.php?ip="
 SHIELD_BLOCKED_IPS_FILE="/var/tmp/luvd-shield-blocked-ips.txt"
 SHIELD_LOG="/var/log/luvd-shield.log"
@@ -19,6 +21,24 @@ mkdir -p /etc/iptables
 # Function to log messages
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >>"$SHIELD_LOG"
+}
+
+# Function to toggle under attack mode
+toggle_under_attack() {
+    local mode="$1"
+    if [ "$mode" = "1" ] || [ "$mode" = "on" ]; then
+        UNDER_ATTACK_MODE=1
+        log "Under Attack Mode ENABLED - All new connections will be blocked immediately"
+        echo "Under Attack Mode ENABLED"
+    elif [ "$mode" = "0" ] || [ "$mode" = "off" ]; then
+        UNDER_ATTACK_MODE=0
+        log "Under Attack Mode DISABLED - Returning to normal operation"
+        echo "Under Attack Mode DISABLED"
+    else
+        echo "Current Under Attack Mode: $UNDER_ATTACK_MODE (0=off, 1=on)"
+        echo "Usage: luvd-shield --under-attack [on|off|1|0]"
+        return 1
+    fi
 }
 
 # Function to block IP
@@ -90,6 +110,7 @@ blocked_list() {
 }
 
 # Function to monitor connections
+# Function to monitor connections
 monitor() {
     if [ -f "/var/log/syslog" ]; then
         LOG_FILE="/var/log/syslog"
@@ -117,11 +138,18 @@ monitor() {
         # Extract IP from SRC= field explicitly
         ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk -F 'SRC=' '{print $2}' | awk '{print $1}' | sed 's/DST=.*//')
         if [ -n "$ip" ] && [ "$ip" != "$SERVER_IP" ] && [ "$ip" != "127.0.0.1" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
-            response=$(curl -s --max-time 2 "$CHECK_API$ip")
-            if [ "$response" = "BLACKLIST" ]; then
+            if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
+                # In under attack mode, block immediately without API check
                 block_ip "$ip"
+                log "Under Attack Mode: Immediately blocked IP $ip"
             else
-                log "IP $ip not blacklisted (response: $response)"
+                # Normal mode with API check
+                response=$(curl -s --max-time 2 "$CHECK_API$ip")
+                if [ "$response" = "BLACKLIST" ]; then
+                    block_ip "$ip"
+                else
+                    log "IP $ip not blacklisted (response: $response)"
+                fi
             fi
         fi
     done &
@@ -147,11 +175,18 @@ monitor() {
                 # Extract IP from SRC= field explicitly
                 ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk -F 'SRC=' '{print $2}' | awk '{print $1}' | sed 's/DST=.*//')
                 if [ -n "$ip" ] && [ "$ip" != "$SERVER_IP" ] && [ "$ip" != "127.0.0.1" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
-                    response=$(curl -s --max-time 2 "$CHECK_API$ip")
-                    if [ "$response" = "BLACKLIST" ]; then
+                    if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
+                        # In under attack mode, block immediately without API check
                         block_ip "$ip"
+                        log "Under Attack Mode: Immediately blocked IP $ip"
                     else
-                        log "IP $ip not blacklisted (response: $response)"
+                        # Normal mode with API check
+                        response=$(curl -s --max-time 2 "$CHECK_API$ip")
+                        if [ "$response" = "BLACKLIST" ]; then
+                            block_ip "$ip"
+                        else
+                            log "IP $ip not blacklisted (response: $response)"
+                        fi
                     fi
                 fi
             done &
@@ -162,6 +197,8 @@ monitor() {
     log "Monitoring stopped due to stop command (PID: $$)"
     kill $TAIL_PID 2>/dev/null
 }
+
+
 
 # Start function
 start() {
