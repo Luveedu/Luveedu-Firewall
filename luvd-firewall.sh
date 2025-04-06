@@ -33,7 +33,7 @@ MALICIOUS_UA_REGEX=(
 )
 
 MALICIOUS_REF_REGEX=(
-    ".*(semalt\.com|buttons-for-website\.com|darodar\.com).*"  # Known spam referrers
+    "^\d+$"  # Known spam referrers
     ".*(sql\.inject|union.*select|eval\(|\.\./\.\.).*"  # Basic injection attempts
     ".*(viagra|cialis|porn|casino|xanax).*"  # Common spam keywords
 )
