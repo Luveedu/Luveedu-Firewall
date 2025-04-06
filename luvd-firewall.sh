@@ -46,11 +46,16 @@ touch "$BLOCKED_IPS_FILE" "$FIREWALL_LOG" "$LAST_LINE_FILE"
 get_ips() {
     local line="$1"
     local ip=$(echo "$line" | awk '{print $1}')
+    
+    # IPv4 regex
     if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+    # IPv6 regex (simplified, covers common formats)
+    elif [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){7}[0-9a-fA-F]{0,4}$ ]]; then
         echo "$ip"
     else
         echo "$(date '+%Y-%m-%d %H:%M:%S') Invalid IP extracted: $ip from line: $line" >>"$FIREWALL_LOG"
-        echo ""  # Return empty string to skip invalid IPs
+        echo ""  # Return empty string for invalid IPs
     fi
 }
 
@@ -118,12 +123,26 @@ block_ip() {
     if [ -z "$ip" ]; then
         return
     fi
-    if ! iptables -C INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') Attempting to reject IP: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
-        iptables -A INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited
-        echo "$ip $(date +%s)" >>"$BLOCKED_IPS_FILE"
-        iptables-save >/etc/iptables/rules.v4
-        echo "$(date '+%Y-%m-%d %H:%M:%S') Rejected IP: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
+    
+    # Check if IP is IPv4 or IPv6
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # IPv4
+        if ! iptables -C INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Attempting to reject IPv4: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
+            iptables -A INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited
+            echo "$ip $(date +%s)" >>"$BLOCKED_IPS_FILE"
+            iptables-save >/etc/iptables/rules.v4
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Rejected IPv4: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
+        fi
+    elif [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){7}[0-9a-fA-F]{0,4}$ ]]; then
+        # IPv6
+        if ! ip6tables -C INPUT -s "$ip" -j REJECT 2>/dev/null; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Attempting to reject IPv6: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
+            ip6tables -A INPUT -s "$ip" -j REJECT
+            echo "$ip $(date +%s)" >>"$BLOCKED_IPS_FILE"
+            ip6tables-save >/etc/ip6tables/rules.v6 2>/dev/null || echo "$(date '+%Y-%m-%d %H:%M:%S') Warning: ip6tables-save failed" >>"$FIREWALL_LOG"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Rejected IPv6: $ip | Reason: $reason | Rate: $rate | PID: $$" >>"$FIREWALL_LOG"
+        fi
     fi
 }
 
@@ -160,14 +179,21 @@ unblock_expired() {
     preserve_log_rule
     while read -r ip timestamp; do
         if [ $((now - timestamp)) -ge $BLOCK_DURATION ]; then
-            iptables -D INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
+            if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                iptables -D INPUT -s "$ip" -j REJECT --reject-with icmp-host-prohibited 2>/dev/null
+                iptables-save >/etc/iptables/rules.v4
+            elif [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){7}[0-9a-fA-F]{0,4}$ ]]; then
+                ip6tables -D INPUT -s "$ip" -j REJECT 2>/dev/null
+                ip6tables-save >/etc/ip6tables/rules.v6 2>/dev/null
+            fi
             sed -i "/^$ip /d" "$BLOCKED_IPS_FILE"
-            iptables-save >/etc/iptables/rules.v4
             echo "$(date '+%Y-%m-%d %H:%M:%S') Unblocked expired IP: $ip" >>"$FIREWALL_LOG"
         fi
     done <"$BLOCKED_IPS_FILE"
     restore_log_rule
 }
+
+
 
 # Function to release all blocked IPs and clear logs
 release_all() {
@@ -326,12 +352,14 @@ check_ua_referrer() {
     local line="$1"
     local ip="$2"
     
-    # Extract User-Agent (last field in quotes)
+    # Extract fields by quotes
     local ua=$(echo "$line" | awk -F'"' '{print $(NF-1)}')
-    # Extract Referrer (second to last field in quotes, if present)
-    local referrer=$(echo "$line" | awk -F'"' '{print $(NF-3)}' | grep -v "^-")
+    local referrer=$(echo "$line" | awk -F'"' '{if (NF >= 5) print $(NF-3); else print ""}' | grep -v "^-")
     
-    # Check User-Agent against malicious patterns
+    # Debug logging for every line
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Checking UA: $ua | Referrer: $referrer for IP: $ip" >>"$FIREWALL_LOG"
+    
+    # Check User-Agent
     for pattern in "${MALICIOUS_UA_REGEX[@]}"; do
         if [[ "$ua" =~ $pattern ]]; then
             block_ip "$ip" "malicious-user-agent" "UA: $ua"
@@ -340,9 +368,10 @@ check_ua_referrer() {
         fi
     done
     
-    # Check Referrer against malicious patterns (if present)
+    # Check Referrer
     if [ -n "$referrer" ]; then
         for pattern in "${MALICIOUS_REF_REGEX[@]}"; do
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Testing referrer $referrer against pattern $pattern" >>"$FIREWALL_LOG"
             if [[ "$referrer" =~ $pattern ]]; then
                 block_ip "$ip" "malicious-referrer" "Ref: $referrer"
                 echo "$(date '+%Y-%m-%d %H:%M:%S') Blocked IP $ip due to Referrer match: $referrer (Pattern: $pattern)" >>"$FIREWALL_LOG"
@@ -353,6 +382,7 @@ check_ua_referrer() {
     
     return 1
 }
+
 
 # Function to check logs (unchanged)
 check_logs() {
