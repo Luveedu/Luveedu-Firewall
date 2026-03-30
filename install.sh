@@ -33,7 +33,6 @@ readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
-# Logging functions
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
@@ -328,7 +327,6 @@ main() {
     check_root
     detect_package_manager
     backup_existing
-    create_directories
     install_prerequisites
     download_components
     create_services
