@@ -16,12 +16,13 @@ import (
 var (
 	cfgFile     string
 	logLevel    string
-	version     = "1.0.0"
+	version     = "2.0.0"
 	showVersion bool
+	rootCmd     *cobra.Command
 )
 
 func main() {
-	rootCmd := &cobra.Command{
+	rootCmd = &cobra.Command{
 		Use:   "luvd-firewall",
 		Short: "Luveedu Enterprise Firewall - Advanced Security Solution",
 		Long: `Luveedu Firewall is an enterprise-grade security solution providing:
@@ -136,6 +137,10 @@ func main() {
 		},
 	}
 	rootCmd.AddCommand(testWAFCmd)
+
+	// Update command - placeholder (to be implemented when releases are available)
+	// updateCmd := createUpdateCommand()
+	// rootCmd.AddCommand(updateCmd)
 
 	// Monitor command (for shield service)
 	monitorCmd := &cobra.Command{
