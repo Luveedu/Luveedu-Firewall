@@ -1,4 +1,4 @@
-module github.com/Luveedu/Luveedu-Firewall
+module github.com/luveedu/luvd-firewall
 
 go 1.19
 
