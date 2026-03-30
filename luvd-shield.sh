@@ -1,371 +1,477 @@
 #!/bin/bash
+#===============================================================================
+# Luveedu Shield - Advanced Kernel-Level Threat Protection
 # File: /usr/local/bin/luvd-shield
-# Luveedu Shield - A Realtime Bad Bots and IP Blocking Solution
+# Version: 2.0.0 (Complete Rewrite)
+# Description: Real-time kernel log monitoring for DDoS, port scans, and 
+#              connection-based attacks with iptables integration
+#===============================================================================
 
+set -euo pipefail
+
+#-------------------------------------------------------------------------------
+# Configuration
+#-------------------------------------------------------------------------------
+readonly VERSION="2.0.0"
+readonly SCRIPT_NAME="luvd-shield"
+readonly PID_FILE="/var/run/luvd-shield.pid"
+readonly BLOCKED_IPS_FILE="/var/tmp/luvd-shield-blocked-ips.txt"
+readonly SHIELD_LOG="/var/log/luvd-shield.log"
+readonly IPTABLES_RULES="/etc/iptables/rules.v4"
+readonly STATE_DIR="/var/lib/luvd-shield"
+readonly LOCK_FILE="/var/lock/luvd-shield.lock"
+
+# Timing
+readonly BLOCK_DURATION="${BLOCK_DURATION:-604800}"  # 7 days
+readonly CHECK_INTERVAL="${CHECK_INTERVAL:-1}"
+readonly ROTATION_INTERVAL="${ROTATION_INTERVAL:-600}"
+
+# API
+readonly CHECK_API="${WAF_API:-https://waf.luveedu.cloud/checkip.php?ip=}"
+readonly API_TIMEOUT="${API_TIMEOUT:-3}"
+readonly API_CACHE_TTL="${API_CACHE_TTL:-300}"
+
+# Under attack mode
 UNDER_ATTACK_MODE=0
 
-CHECK_API="https://waf.luveedu.cloud/checkip.php?ip="
-SHIELD_BLOCKED_IPS_FILE="/var/tmp/luvd-shield-blocked-ips.txt"
-SHIELD_LOG="/var/log/luvd-shield.log"
-PID_FILE="/var/run/luvd-shield.pid"
-BLOCK_DURATION=$((60 * 60 * 24 * 7)) # 7 days in seconds
-ROTATION_INTERVAL=600                # 10 minutes in seconds
-IPTABLES_RULES_FILE="/etc/iptables/rules.v4"
-SERVER_IP="" # Will be set in fix_all
+# Server IP
+SERVER_IP=""
 
-# Ensure required files and directories exist
-touch "$SHIELD_BLOCKED_IPS_FILE" "$SHIELD_LOG"
-mkdir -p /etc/iptables
-[ -f "$IPTABLES_RULES_FILE" ] || touch "$IPTABLES_RULES_FILE"
+#-------------------------------------------------------------------------------
+# Initialization
+#-------------------------------------------------------------------------------
+init() {
+    mkdir -p "$STATE_DIR" "$(dirname "$BLOCKED_IPS_FILE")" "$(dirname "$SHIELD_LOG")" /etc/iptables
+    touch "$BLOCKED_IPS_FILE" "$SHIELD_LOG"
+    exec 200>"$LOCK_FILE"
+    
+    # Detect server IP
+    SERVER_IP=$(curl -s --max-time 5 https://ipv4.icanhazip.com/ 2>/dev/null || \
+                ip route get 1 | awk '{print $7; exit}' || \
+                hostname -I | awk '{print $1}')
+    
+    log INFO "Shield initialized (Server IP: $SERVER_IP, PID: $$)"
+}
 
-# Function to log messages
+#-------------------------------------------------------------------------------
+# Logging
+#-------------------------------------------------------------------------------
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >>"$SHIELD_LOG"
+    local level="$1"; shift
+    local msg="$*"
+    local ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$ts] [$level] $msg" >> "$SHIELD_LOG"
+    logger -t "$SCRIPT_NAME" "$msg" 2>/dev/null || true
+    [ -t 1 ] && echo "[$ts] [$level] $msg"
 }
 
-# Function to toggle under attack mode
-toggle_under_attack() {
-    local mode="$1"
-    if [ "$mode" = "1" ] || [ "$mode" = "on" ]; then
-        UNDER_ATTACK_MODE=1
-        log "Under Attack Mode ENABLED - All new connections will be blocked immediately"
-        echo "Under Attack Mode ENABLED"
-    elif [ "$mode" = "0" ] || [ "$mode" = "off" ]; then
-        UNDER_ATTACK_MODE=0
-        log "Under Attack Mode DISABLED - Returning to normal operation"
-        echo "Under Attack Mode DISABLED"
-    else
-        echo "Current Under Attack Mode: $UNDER_ATTACK_MODE (0=off, 1=on)"
-        echo "Usage: luvd-shield --under-attack [on|off|1|0]"
-        return 1
+log_info() { log INFO "$@"; }
+log_warning() { log WARNING "$@"; }
+log_error() { log ERROR "$@"; }
+
+#-------------------------------------------------------------------------------
+# API Integration
+#-------------------------------------------------------------------------------
+declare -A API_CACHE
+declare -A API_CACHE_TIME
+
+check_api() {
+    local ip="$1"
+    local now=$(date +%s)
+    local cache_key="$ip"
+    
+    # Check cache
+    if [ -n "${API_CACHE[$cache_key]:-}" ]; then
+        local age=$((now - ${API_CACHE_TIME[$cache_key]:-0}))
+        [ "$age" -lt "$API_CACHE_TTL" ] && { echo "${API_CACHE[$cache_key]}"; return 0; }
     fi
+    
+    # Query API
+    local response
+    response=$(curl -s --max-time "$API_TIMEOUT" "${CHECK_API}${ip}" 2>/dev/null) || response="ERROR"
+    
+    # Cache result
+    API_CACHE[$cache_key]="$response"
+    API_CACHE_TIME[$cache_key]=$now
+    
+    echo "$response"
 }
 
-# Function to block IP
+is_blacklisted() {
+    [ "$(check_api "$1")" = "BLACKLIST" ]
+}
+
+is_whitelisted() {
+    [ "$(check_api "$1")" = "WHITELIST" ]
+}
+
+#-------------------------------------------------------------------------------
+# IP Blocking
+#-------------------------------------------------------------------------------
 block_ip() {
     local ip="$1"
-    if grep -q "^$ip " "/var/tmp/luvd-blocked-ips.txt"; then
-        log "IP $ip already blocked by luvd-firewall, skipping"
-        return
-    fi
+    local reason="${2:-shield}"
+    
+    [ -z "$ip" ] && return 1
+    [ "$ip" = "$SERVER_IP" ] || [ "$ip" = "127.0.0.1" ] && return 0
+    grep -q "^$ip " "$BLOCKED_IPS_FILE" 2>/dev/null && return 0
+    grep -q "^$ip " /var/tmp/luvd-blocked-ips.txt 2>/dev/null && return 0
+    
+    # Block with iptables
     if ! iptables -C INPUT -s "$ip" -j DROP 2>/dev/null; then
         iptables -A INPUT -s "$ip" -j DROP
-        echo "$ip $(date +%s)" >>"$SHIELD_BLOCKED_IPS_FILE"
-        iptables-save >"$IPTABLES_RULES_FILE"
-        log "Blocked IP $ip on all ports"
-    else
-        log "IP $ip already blocked"
+        log_info "Blocked IP: $ip | Reason: $reason"
     fi
+    
+    # Add to ipset if available
+    if command -v ipset &>/dev/null; then
+        ipset add luveedu_blocked "$ip" timeout "$BLOCK_DURATION" 2>/dev/null || true
+    fi
+    
+    # Record
+    echo "$ip $(date +%s) $reason" >> "$BLOCKED_IPS_FILE"
+    
+    # Persist
+    save_rules
+    
+    return 0
 }
-# Function to unblock expired IPs without removing LOG rule
+
+unblock_ip() {
+    local ip="$1"
+    
+    iptables -D INPUT -s "$ip" -j DROP 2>/dev/null || true
+    command -v ipset &>/dev/null && ipset del luveedu_blocked "$ip" 2>/dev/null || true
+    sed -i "/^$ip /d" "$BLOCKED_IPS_FILE"
+    save_rules
+    
+    log_info "Unblocked IP: $ip"
+}
+
 unblock_expired() {
     local now=$(date +%s)
-    local temp_file=$(mktemp)
-    cp "$SHIELD_BLOCKED_IPS_FILE" "$temp_file"
-    while read -r ip timestamp; do
-        if [ -n "$ip" ] && [ $((now - timestamp)) -ge $BLOCK_DURATION ]; then
-            iptables -D INPUT -s "$ip" -j DROP 2>/dev/null
-            grep -v "^$ip " "$temp_file" >"$SHIELD_BLOCKED_IPS_FILE"
-            # Ensure LOG rule persists
-            if ! iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
-                iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
-                log "Re-added LOG rule to iptables"
-            fi
-            iptables-save >"$IPTABLES_RULES_FILE"
-            log "Unblocked expired IP: $ip"
-        fi
-    done <"$temp_file"
-    rm -f "$temp_file"
+    while read -r ip timestamp reason; do
+        [ -z "$ip" ] && continue
+        [[ "$timestamp" =~ ^[0-9]+$ ]] || continue
+        [ $((now - timestamp)) -ge "$BLOCK_DURATION" ] && unblock_ip "$ip"
+    done < "$BLOCKED_IPS_FILE"
 }
 
-# Function to rotate logs every 10 minutes
-rotate_logs() {
-    log "Rotating logs..."
-    >"$SHIELD_LOG"
-    if [ -f "$LOG_FILE" ]; then
-        >"$LOG_FILE"
-        log "Cleared kernel log: $LOG_FILE"
-    fi
-    log "Log rotation completed"
+save_rules() {
+    iptables-save > "$IPTABLES_RULES" 2>/dev/null || true
 }
 
-# Function to display blocked IPs
-blocked_list() {
-    while true; do
-        printf "\033c"
-        echo "Luveedu Shield - Realtime Block Malicious IPs (Refreshes every 10 seconds)"
-        echo "----------------------------------------------------"
-        echo "IP Address         | Blocked Since"
-        echo "----------------------------------------------------"
-        if [ -s "$SHIELD_BLOCKED_IPS_FILE" ]; then
-            while read -r ip timestamp; do
-                blocked_time=$(date -d "@$timestamp" '+%Y-%m-%d %H:%M:%S')
-                printf "%-18s | %s\n" "$ip" "$blocked_time"
-            done <"$SHIELD_BLOCKED_IPS_FILE"
-        else
-            echo "No IPs are currently blocked."
-        fi
-        sleep 10
+#-------------------------------------------------------------------------------
+# Kernel Log Monitoring
+#-------------------------------------------------------------------------------
+find_log_file() {
+    for log in /var/log/syslog /var/log/messages /var/log/kern.log; do
+        [ -f "$log" ] && [ -r "$log" ] && { echo "$log"; return 0; }
     done
+    return 1
 }
 
-# Function to monitor connections
-# Function to monitor connections
-monitor() {
-    if [ -f "/var/log/syslog" ]; then
-        LOG_FILE="/var/log/syslog"
-    elif [ -f "/var/log/messages" ]; then
-        LOG_FILE="/var/log/messages"
-    elif [ -f "/var/log/kern.log" ]; then
-        LOG_FILE="/var/log/kern.log"
-    else
-        log "No kernel log file found."
-        exit 1
+extract_ip_from_log() {
+    local line="$1"
+    local ip=""
+    
+    # Extract from SRC= field (iptables log format)
+    if [[ "$line" =~ SRC=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+        ip="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ SRC=([0-9a-fA-F:]+) ]]; then
+        ip="${BASH_REMATCH[1]}"
     fi
+    
+    # Validate
+    if [ -n "$ip" ] && [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$ip" =~ : ]]; then
+        echo "$ip"
+    fi
+}
 
-    log "Using log file: $LOG_FILE"
+detect_attack_patterns() {
+    local line="$1"
+    local ip="$2"
+    
+    # Port scan detection
+    if [[ "$line" =~ (SYN|XMAS|NULL|FIN) ]] || [[ "$line" =~ DPT=[0-9]+.*DPT=[0-9]+ ]]; then
+        log_warning "Port scan detected from $ip"
+        block_ip "$ip" "port-scan"
+        return 0
+    fi
+    
+    # Connection flood detection
+    if [[ "$line" =~ (CONNLIMIT|RATELIMIT) ]]; then
+        log_warning "Connection flood from $ip"
+        block_ip "$ip" "conn-flood"
+        return 0
+    fi
+    
+    # Invalid packet detection
+    if [[ "$line" =~ (INVALID|BAD|MALFORMED) ]]; then
+        log_warning "Invalid packets from $ip"
+        block_ip "$ip" "invalid-packets"
+        return 0
+    fi
+    
+    return 1
+}
 
-    trap 'log "Monitoring stopped by signal (PID: $$)"; kill $TAIL_PID 2>/dev/null; exit' SIGTERM SIGINT
-    log "Luveedu Shield started. Monitoring: $LOG_FILE (PID: $$)"
-
-    local last_rotation=0
-
-    stdbuf -o0 tail -F "$LOG_FILE" 2>/dev/null | while true; do
-        read -r line || {
-            log "tail pipeline failed or EOF reached"
-            break
-        }
-        # Extract IP from SRC= field explicitly
-        ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk -F 'SRC=' '{print $2}' | awk '{print $1}' | sed 's/DST=.*//')
-        if [ -n "$ip" ] && [ "$ip" != "$SERVER_IP" ] && [ "$ip" != "127.0.0.1" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
-            if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
-                # In under attack mode, block immediately without API check
-                block_ip "$ip"
-                log "Under Attack Mode: Immediately blocked IP $ip"
-            else
-                # Normal mode with API check
-                response=$(curl -s --max-time 2 "$CHECK_API$ip")
-                if [ "$response" = "BLACKLIST" ]; then
-                    block_ip "$ip"
-                else
-                    log "IP $ip not blacklisted (response: $response)"
-                fi
-            fi
-        fi
-    done &
-    TAIL_PID=$!
-
-    while [ -f "$PID_FILE" ]; do
-        if [ ! -r "$LOG_FILE" ]; then
-            log "Log file $LOG_FILE is not readable or missing. Exiting."
-            kill $TAIL_PID 2>/dev/null
-            exit 1
-        fi
-
+monitor_kernel_logs() {
+    local log_file="$1"
+    log_info "Monitoring kernel log: $log_file (PID: $$)"
+    
+    trap 'log_info "Monitor stopped"; exit 0' SIGTERM SIGINT
+    
+    local last_clean=0
+    local last_pos=0
+    
+    # Use tail -F for log rotation handling
+    tail -n 0 -F "$log_file" 2>/dev/null | while IFS= read -r line; do
         local now=$(date +%s)
-        if [ $((now - last_rotation)) -ge $ROTATION_INTERVAL ]; then
-            rotate_logs
-            last_rotation=$now
-            kill $TAIL_PID 2>/dev/null
-            stdbuf -o0 tail -F "$LOG_FILE" 2>/dev/null | while true; do
-                read -r line || {
-                    log "tail pipeline failed or EOF reached"
-                    break
-                }
-                # Extract IP from SRC= field explicitly
-                ip=$(echo "$line" | grep "LUVEEDU-SHIELD:" | awk -F 'SRC=' '{print $2}' | awk '{print $1}' | sed 's/DST=.*//')
-                if [ -n "$ip" ] && [ "$ip" != "$SERVER_IP" ] && [ "$ip" != "127.0.0.1" ] && ! grep -q "^$ip " "$SHIELD_BLOCKED_IPS_FILE"; then
-                    if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
-                        # In under attack mode, block immediately without API check
-                        block_ip "$ip"
-                        log "Under Attack Mode: Immediately blocked IP $ip"
-                    else
-                        # Normal mode with API check
-                        response=$(curl -s --max-time 2 "$CHECK_API$ip")
-                        if [ "$response" = "BLACKLIST" ]; then
-                            block_ip "$ip"
-                        else
-                            log "IP $ip not blacklisted (response: $response)"
-                        fi
-                    fi
-                fi
-            done &
-            TAIL_PID=$!
+        
+        # Periodic cleanup
+        if [ $((now - last_clean)) -ge 60 ]; then
+            unblock_expired
+            last_clean=$now
         fi
-        sleep 1
-    done
-    log "Monitoring stopped due to stop command (PID: $$)"
-    kill $TAIL_PID 2>/dev/null
-}
-
-
-
-# Start function
-start() {
-    if [ -f "$PID_FILE" ]; then
-        pid=$(cat "$PID_FILE")
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "Luveedu Shield is already running (PID: $pid)"
-            exit 1
-        else
-            rm -f "$PID_FILE"
-        fi
-    fi
-    if [ -s "$IPTABLES_RULES_FILE" ]; then
-        iptables-restore <"$IPTABLES_RULES_FILE" || log "Failed to restore iptables rules"
-    fi
-    if [ -z "$SERVER_IP" ]; then
-        fix_all
-    fi
-    monitor &>>"$SHIELD_LOG" &
-    pid=$!
-    echo "$pid" >"$PID_FILE"
-    echo "Luveedu Shield started (PID: $pid)"
-    log "Service started manually with PID: $pid"
-}
-
-# Stop function
-stop() {
-    if [ -f "$PID_FILE" ]; then
-        pid=$(cat "$PID_FILE")
-        if kill -TERM "$pid" 2>/dev/null; then
-            log "Stopping Luveedu Shield (PID: $pid)"
-            rm -f "$PID_FILE"
-            attempts=0
-            while kill -0 "$pid" 2>/dev/null && [ $attempts -lt 5 ]; do
-                sleep 1
-                ((attempts++))
-            done
-            if kill -0 "$pid" 2>/dev/null; then
-                log "Force killing Luveedu Shield (PID: $pid)"
-                kill -9 "$pid" 2>/dev/null
-                pkill -9 luvd-shield
+        
+        # Only process LUVEEDU-SHIELD logged packets or new connections
+        if [[ "$line" =~ LUVEEDU-SHIELD ]] || [[ "$line" =~ NEW.*IN= ]]; then
+            local ip=$(extract_ip_from_log "$line")
+            
+            [ -z "$ip" ] && continue
+            [ "$ip" = "$SERVER_IP" ] || [ "$ip" = "127.0.0.1" ] && continue
+            
+            # Under attack mode - block everything
+            if [ "$UNDER_ATTACK_MODE" -eq 1 ]; then
+                is_whitelisted "$ip" || grep -q "^$ip " "$BLOCKED_IPS_FILE" 2>/dev/null || block_ip "$ip" "under-attack"
+                continue
             fi
-            echo "Luveedu Shield stopped"
-        else
-            echo "Luveedu Shield process (PID: $pid) not found"
-            rm -f "$PID_FILE"
-            exit 1
+            
+            # Skip already blocked
+            grep -q "^$ip " "$BLOCKED_IPS_FILE" 2>/dev/null && continue
+            
+            # Check attack patterns
+            detect_attack_patterns "$line" "$ip" && continue
+            
+            # Check API blacklist
+            if is_blacklisted "$ip"; then
+                block_ip "$ip" "api-blacklist"
+            fi
         fi
-    else
-        echo "Luveedu Shield is not running"
-        exit 1
-    fi
+    done
 }
 
-# Reset function (Updated to preserve LOG rule)
-reset() {
-    if [ -f "/var/log/syslog" ]; then
-        LOG_FILE="/var/log/syslog"
-    elif [ -f "/var/log/messages" ]; then
-        LOG_FILE="/var/log/messages"
-    elif [ -f "/var/log/kern.log" ]; then
-        LOG_FILE="/var/log/kern.log"
-    else
-        log "No kernel log file found."
+#-------------------------------------------------------------------------------
+# Service Management
+#-------------------------------------------------------------------------------
+start_service() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
+        echo "Shield already running (PID: $(cat $PID_FILE))"
         exit 1
     fi
-
-    log "Resetting Luveedu Shield..."
-    local temp_file=$(mktemp)
-    cp "$SHIELD_BLOCKED_IPS_FILE" "$temp_file"
-    while read -r ip timestamp; do
-        iptables -D INPUT -s "$ip" -j DROP 2>/dev/null
-        grep -v "^$ip " "$temp_file" >"$SHIELD_BLOCKED_IPS_FILE"
-        log "Released IP: $ip"
-        # Ensure LOG rule persists
-        if ! iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
-            iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
-            log "Re-added LOG rule to iptables during reset"
-        fi
-    done <"$temp_file"
-    rm -f "$temp_file"
-
-    >"$SHIELD_BLOCKED_IPS_FILE"
-    >"$SHIELD_LOG"
-    >"$LOG_FILE"
-    rm -f /var/tmp/luvd-shield-last-pos-*
-    fix_all
-    sleep 2
-    systemctl restart luvd-shield 2>/dev/null || start
-    sleep 3
-    log "Luveedu Shield reset complete and restarted."
-    echo "Luveedu Shield reset complete."
-}
-
-# Function to fix iptables rules
-fix_all() {
-    echo "Fixing iptables rules for Luveedu Shield..."
-    log "Fixing iptables rules for Luveedu Shield..."
-
-    SERVER_IP=$(curl -s --max-time 2 https://ipv4.icanhazip.com/ 2>/dev/null || ip -4 addr show $(ip route | grep default | awk '{print $5}' | head -n 1) | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -n 1)
-
-    if [ -z "$SERVER_IP" ]; then
-        log "Failed to determine server IP"
-        echo "Failed to determine server IP"
-        exit 1
-    fi
-
-    # Preserve existing rules, only ensure LOG rule exists
-    if ! iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null; then
+    rm -f "$PID_FILE"
+    
+    init
+    
+    # Restore rules
+    [ -f "$IPTABLES_RULES" ] && iptables-restore < "$IPTABLES_RULES" 2>/dev/null || true
+    
+    # Ensure LOG rule exists
+    iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null || \
         iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
-    fi
-
-    iptables-save >/etc/iptables/rules.v4
-    log "iptables rules set to log all new connections (Server IP: $SERVER_IP)"
-    echo "iptables rules set to log all new connections (Server IP: $SERVER_IP)"
+    
+    save_rules
+    
+    # Find log file
+    local log_file
+    log_file=$(find_log_file) || { log_error "No kernel log found"; exit 1; }
+    
+    # Start monitor
+    nohup bash -c "$(declare -f); monitor_kernel_logs '$log_file'" >> "$SHIELD_LOG" 2>&1 &
+    local pid=$!
+    
+    echo "$pid" > "$PID_FILE"
+    log_info "Started (PID: $pid, Log: $log_file)"
+    echo "Luveedu Shield started (PID: $pid)"
 }
 
+stop_service() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "Shield not running"
+        exit 1
+    fi
+    
+    local pid=$(cat "$PID_FILE")
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 2
+    kill -9 "$pid" 2>/dev/null || true
+    pkill -f "luvd-shield.*monitor" 2>/dev/null || true
+    
+    rm -f "$PID_FILE"
+    log_info "Stopped"
+    echo "Stopped"
+}
 
-# Function to update script
-update() {
-    echo "Updating Luveedu Shield script..."
-    log "Updating Luveedu Shield script..."
-    local github_url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/luvd-shield.sh"
-    local script_path="/usr/local/bin/luvd-shield"
+restart_service() {
+    stop_service 2>/dev/null || true
+    sleep 2
+    start_service
+}
 
-    if curl -s --max-time 10 "$github_url" >"$script_path.tmp"; then
-        mv "$script_path.tmp" "$script_path"
-        sed -i 's/\r$//' "$script_path"
-        chmod +x "$script_path"
-        "$script_path" --reset
-        log "Script updated successfully!"
-        echo "Script updated successfully!"
+#-------------------------------------------------------------------------------
+# CLI Commands
+#-------------------------------------------------------------------------------
+show_status() {
+    echo "=== Luveedu Shield Status ==="
+    [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null && echo "Status: Running" || echo "Status: Stopped"
+    echo "Server IP: $SERVER_IP"
+    echo "Blocked IPs: $(wc -l < "$BLOCKED_IPS_FILE" 2>/dev/null || echo 0)"
+    echo ""
+    echo "Recent blocks:"
+    tail -n 5 "$BLOCKED_IPS_FILE" 2>/dev/null | awk '{print "  "$1" - "$3}'
+}
+
+show_blocked() {
+    echo "=== Blocked IPs ==="
+    [ ! -s "$BLOCKED_IPS_FILE" ] && { echo "None"; return; }
+    printf "%-20s %-20s %s\n" "IP" "Time" "Reason"
+    while read -r ip ts reason; do
+        [ -n "$ip" ] && printf "%-20s %-20s %s\n" "$ip" "$(date -d @$ts '+%Y-%m-%d %H:%M')" "${reason:-N/A}"
+    done < "$BLOCKED_IPS_FILE"
+}
+
+release_all() {
+    while read -r ip rest; do
+        [ -n "$ip" ] && unblock_ip "$ip"
+    done < "$BLOCKED_IPS_FILE"
+    > "$BLOCKED_IPS_FILE"
+    save_rules
+    echo "All released"
+}
+
+check_ip() {
+    local ip="$1"
+    [ -z "$ip" ] && { echo "Usage: --check-ip <IP>"; exit 1; }
+    
+    echo "IP: $ip"
+    grep -q "^$ip " "$BLOCKED_IPS_FILE" && echo "  Local: BLOCKED" || echo "  Local: Not blocked"
+    is_blacklisted "$ip" && echo "  API: BLACKLISTED"
+    is_whitelisted "$ip" && echo "  API: WHITELISTED"
+}
+
+enable_under_attack() {
+    case "$1" in
+        on|1)
+            UNDER_ATTACK_MODE=1
+            log_warning "Under Attack Mode ENABLED"
+            echo "Under Attack Mode: ON"
+            ;;
+        off|0)
+            UNDER_ATTACK_MODE=0
+            log_info "Under Attack Mode DISABLED"
+            echo "Under Attack Mode: OFF"
+            ;;
+        *)
+            echo "Mode: $([ $UNDER_ATTACK_MODE -eq 1 ] && echo ON || echo OFF)"
+            ;;
+    esac
+}
+
+fix_iptables() {
+    echo "Fixing iptables rules..."
+    
+    # Add LOG rule
+    iptables -C INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: " 2>/dev/null || \
+        iptables -A INPUT -m state --state NEW -j LOG --log-prefix "LUVEEDU-SHIELD: "
+    
+    save_rules
+    log_info "iptables rules fixed"
+    echo "Fixed"
+}
+
+update_script() {
+    local url="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/main/luvd-shield.sh"
+    echo "Updating..."
+    
+    if curl -s --max-time 10 "$url" -o /tmp/luvd-shield.new && [ -s /tmp/luvd-shield.new ]; then
+        cp /usr/local/bin/luvd-shield /usr/local/bin/luvd-shield.bak.$(date +%F)
+        mv /tmp/luvd-shield.new /usr/local/bin/luvd-shield
+        chmod +x /usr/local/bin/luvd-shield
+        restart_service
+        echo "Updated"
     else
-        log "Failed to update script!"
-        echo "Failed to update script!"
+        echo "Update failed"
         exit 1
     fi
 }
 
-# CLI handling
-case "$1" in
---start)
-    start
-    ;;
---stop)
-    stop
-    ;;
---reset)
-    reset
-    ;;
---blocked-list)
-    blocked_list
-    ;;
---fix-all)
-    fix_all
-    ;;
---update)
-    update
-    ;;
-*)
-    echo "Usage: luvd-shield [OPTION] [ARGUMENT]"
-    echo " --start         - It starts the Blocking Engine"
-    echo " --stop          - It stops the Blocking Engine"
-    echo " --blocked-list  - Check the Blocked IPs"
-    echo " --fix-all       - Fix the Issues related to logging & iptables"
-    echo " --reset         - If the Shield is not Working Simply Reset the Configuration"
-    echo " --update        - Update the Script to the Latest Version from Github"
-    exit 1
-    ;;
+reset_shield() {
+    echo "Resetting Shield..."
+    stop_service 2>/dev/null || true
+    
+    > "$BLOCKED_IPS_FILE"
+    > "$SHIELD_LOG"
+    
+    # Remove all shield DROP rules
+    iptables -S INPUT | grep "DROP" | grep -v "LUVEEDU" | while read -r rule; do
+        local ip=$(echo "$rule" | grep -oP '(?<=-s )\S+')
+        [ -n "$ip" ] && iptables -D INPUT -s "$ip" -j DROP 2>/dev/null
+    done
+    
+    save_rules
+    start_service
+    echo "Reset complete"
+}
+
+show_help() {
+    cat << EOF
+Luveedu Shield v$VERSION - Kernel-Level Protection
+
+Usage: luvd-shield [OPTION]
+
+Service:
+  --start       Start shield
+  --stop        Stop shield
+  --restart     Restart shield
+  --status      Show status
+
+IP Management:
+  --blocked-list    List blocked IPs
+  --release-ip IP   Unblock specific IP
+  --release-all     Unblock all
+  --check-ip IP     Check IP status
+
+Security:
+  --under-attack on|off  Enable attack mode
+
+Maintenance:
+  --fix-all       Fix iptables rules
+  --update        Update script
+  --reset         Reset everything
+  --help          Show this help
+
+EOF
+}
+
+#-------------------------------------------------------------------------------
+# Main
+#-------------------------------------------------------------------------------
+[ "$EUID" -ne 0 ] && { echo "Run as root"; exit 1; }
+
+case "${1:-}" in
+    --start) start_service ;;
+    --stop) stop_service ;;
+    --restart) restart_service ;;
+    --status) show_status ;;
+    --blocked-list) show_blocked ;;
+    --release-ip) release_all; [ -n "$2" ] && unblock_ip "$2" ;;
+    --release-all) release_all ;;
+    --check-ip) check_ip "$2" ;;
+    --under-attack) enable_under_attack "$2" ;;
+    --fix-all) fix_iptables ;;
+    --update) update_script ;;
+    --reset) reset_shield ;;
+    --help|-h) show_help ;;
+    *) show_help; exit 1 ;;
 esac
