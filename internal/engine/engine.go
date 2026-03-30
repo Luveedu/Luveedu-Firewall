@@ -2,10 +2,8 @@ package engine
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -377,9 +375,6 @@ func cleanupExpiredBlocks(cfg *config.Config) {
 
 // cleanupOldRequestCounts removes old request count entries
 func cleanupOldRequestCounts() {
-	now := time.Now()
-	maxAge := 30 * time.Second
-
 	requestCountsMutex.Lock()
 	defer requestCountsMutex.Unlock()
 
@@ -440,7 +435,13 @@ func watchLogFile(path string, cfg *config.Config) {
 			continue
 		}
 		
-		if stat.Size() < file.Seek(0, 1) {
+		currentPos, err := file.Seek(0, 1)
+		if err != nil {
+			newFile.Close()
+			continue
+		}
+		
+		if stat.Size() < currentPos {
 			// File was rotated
 			file.Close()
 			file = newFile
@@ -572,7 +573,13 @@ func watchSyslogFile(path string, cfg *config.Config) {
 			continue
 		}
 		
-		if stat.Size() < file.Seek(0, 1) {
+		currentPos, err := file.Seek(0, 1)
+		if err != nil {
+			newFile.Close()
+			continue
+		}
+		
+		if stat.Size() < currentPos {
 			file.Close()
 			file = newFile
 			scanner = bufio.NewScanner(file)

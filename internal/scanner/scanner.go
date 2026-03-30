@@ -137,7 +137,7 @@ func runClamScan(path string, cfg *config.Config) ([]ScanResult, error) {
 
 	args := []string{"--no-summary", "-r", path}
 	cmd := exec.Command("clamscan", args...)
-	output, err := cmd.CombinedOutput()
+	output, _ := cmd.CombinedOutput()
 
 	// Parse output for infected files
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
