@@ -17,7 +17,7 @@
 set -euo pipefail
 
 # Configuration
-readonly GITHUB_REPO="https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/main"
+readonly GITHUB_REPO="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/refs/heads/main/"
 readonly INSTALL_DIR="/opt/luveedu-firewall"
 readonly BIN_DIR="/usr/local/bin"
 readonly CONFIG_DIR="/etc/luveedu-firewall"
