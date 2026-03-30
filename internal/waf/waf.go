@@ -35,7 +35,7 @@ var (
 
 	rcePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(\b(cmd|exec|system|shell|eval|passthru|popen|proc_open)\s*\()`),
-		regexp.MustCompile(`(?i)(\b(wget|curl|nc|netcat|bash|sh|zsh|ksh)\s+-)`),
+		regexp.MustCompile(`(?i)(wget|curl|nc|netcat|bash|sh|zsh|ksh)[-+=\s]`),
 		regexp.MustCompile(`(?i)(\|\s*(cmd|exec|system|eval))`),
 		regexp.MustCompile(`(?i)(\$\{.*\})`),
 	}
