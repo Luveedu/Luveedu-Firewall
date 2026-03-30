@@ -1,9 +1,18 @@
 #!/bin/bash
 
-# Luveedu Firewall - All-in-One Installation Script
-# Usage: curl -sSL https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/main/install.sh | sudo bash
+# =============================================================================
+# Luveedu Firewall v2.0 - Enterprise Grade Installer (Non-Interactive Force Mode)
+# =============================================================================
+# This script installs Go, dependencies, compiles the firewall, and sets up 
+# systemd services. It forces non-interactive mode to bypass all prompts 
+# (including Postfix, Dovecot, etc.).
+# =============================================================================
 
 set -euo pipefail
+
+# Force Non-Interactive Mode for ALL subprocesses
+export DEBIAN_FRONTEND=noninteractive
+export TZ=UTC
 
 readonly GITHUB_REPO="https://raw.githubusercontent.com/Luveedu/Luveedu-Firewall/main"
 readonly INSTALL_DIR="/opt/luveedu-firewall"
@@ -42,15 +51,73 @@ detect_os() {
     fi
 }
 
+wait_for_apt() {
+    # Only for apt-based systems
+    [[ "$PKG_MANAGER" != "apt" ]] && return
+    
+    log_info "Waiting for apt locks..."
+    local count=0
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+          fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+          fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+        count=$((count + 1))
+        if [ $count -gt 60 ]; then
+            log_error "Timeout waiting for apt lock"
+        fi
+        log_warn "Waiting for package manager... ($count/60)"
+        sleep 5
+    done
+}
+
 install_prerequisites() {
-    log_info "Installing prerequisites..."
+    log_info "Installing prerequisites (force non-interactive)..."
+    
     case $PKG_MANAGER in
-        apt) export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq iptables ipset curl wget git cron clamav clamav-daemon rkhunter golang-go jq ;;
-        dnf|yum) $PKG_MANAGER install -y iptables ipset curl wget git cronie clamav clamav-server rkhunter golang jq ;;
-        apk) apk add --no-cache iptables ipset curl wget git openrc cronie clamav rkhunter go jq ;;
-        pacman) pacman -Sy --noconfirm iptables ipset curl wget git cron clamav rkhunter go jq ;;
+        apt)
+            wait_for_apt
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            
+            # Pre-seed Postfix to avoid interactive prompts
+            debconf-set-selections <<< "postfix postfix/main_mailer_type select Internet Site"
+            debconf-set-selections <<< "postfix postfix/mailname string localhost.localdomain"
+            debconf-set-selections <<< "postfix postfix/mydestination string localhost.localdomain, localhost"
+            
+            # Install all packages with force options to skip prompts
+            apt-get install -y -qq \
+                iptables ipset curl wget git cron \
+                clamav clamav-daemon rkhunter golang-go jq \
+                build-essential debconf-utils postfix mailutils \
+                --no-install-recommends \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold"
+            
+            # Force reconfigure postfix non-interactively
+            dpkg-reconfigure -f noninteractive postfix || true
+            
+            # Configure ClamAV
+            systemctl enable clamav-freshclam
+            systemctl enable clamav-daemon
+            systemctl start clamav-freshclam
+            systemctl start clamav-daemon || true
+            ;;
+        dnf|yum)
+            $PKG_MANAGER install -y iptables ipset curl wget git cronie clamav clamav-server rkhunter golang jq postfix
+            systemctl enable --now clamd-update 2>/dev/null || true
+            systemctl enable --now clamd@scan 2>/dev/null || true
+            ;;
+        apk)
+            apk add --no-cache iptables ipset curl wget git openrc cronie clamav rkhunter go jq postfix
+            rc-update add clamav-freshclam
+            rc-update add clamav
+            ;;
+        pacman)
+            pacman -Sy --noconfirm --needed iptables ipset curl wget git cron clamav rkhunter go jq postfix
+            systemctl enable --now clamav-freshclam.service 2>/dev/null || true
+            systemctl enable --now clamav-daemon.service 2>/dev/null || true
+            ;;
     esac
-    systemctl enable --now clamav-freshclam 2>/dev/null || true
+    
     log_success "Prerequisites installed"
 }
 
@@ -190,7 +257,8 @@ show_status() {
 
 main() {
     echo -e "${BLUE}========================================================${NC}"
-    echo -e "${BLUE}  LUVEEDU ENTERPRISE FIREWALL INSTALLER${NC}"
+    echo -e "${BLUE}  LUVEEDU ENTERPRISE FIREWALL v2.0 INSTALLER${NC}"
+    echo -e "${BLUE}  (Non-Interactive Force Mode)${NC}"
     echo -e "${BLUE}========================================================${NC}\n"
     
     check_root
