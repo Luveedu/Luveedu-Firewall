@@ -1,3 +1,60 @@
 ```
-*.bak
+# Binaries
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
+
+# Go-specific
+*.o
+*.test
+*.prof
+cover.out
+coverage/
+
+# Dependencies
+vendor/
+node_modules/
+.npm/
+.yarn/
+
+# Logs
+*.log
+*log
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.swp
+.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+.directory
+.Trashes
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Build artifacts
+dist/
+build/
+target/
+bin/
+out/
+tmp/
 ```
