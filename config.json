@@ -1,0 +1,46 @@
+{
+  "log_level": "info",
+  "port": 8080,
+  "block_duration": 3600,
+  "max_connections": 1000,
+  "rate_limit": {
+    "enabled": true,
+    "burst_window": 3,
+    "burst_limit": 15,
+    "sustained_window": 30,
+    "sustained_limit": 150
+  },
+  "waf": {
+    "enabled": true,
+    "sql_injection": true,
+    "xss": true,
+    "path_traversal": true,
+    "rce": true,
+    "file_inclusion": true,
+    "block_patterns": [],
+    "custom_rules": []
+  },
+  "scanner": {
+    "enabled": true,
+    "clamav_socket": "/var/run/clamav/clamd.ctl",
+    "rkhunter": true,
+    "scan_paths": [
+      "/var/www",
+      "/home"
+    ],
+    "quarantine_dir": "/opt/luveedu-firewall/quarantine",
+    "auto_clean": false
+  },
+  "whitelist": [],
+  "blacklist": [],
+  "api": {
+    "enabled": true,
+    "url": "https://api.luveedu.com/threat-intel",
+    "api_key": "",
+    "cache_timeout": 300,
+    "timeout": 10,
+    "retry_count": 3
+  },
+  "log_path": "/var/log/luveedu",
+  "data_path": "/opt/luveedu-firewall/data"
+}
